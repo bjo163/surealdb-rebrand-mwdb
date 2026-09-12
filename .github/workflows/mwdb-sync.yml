@@ -1,0 +1,42 @@
+name: MW-DB Sync Prototype
+
+on:
+  push:
+    paths:
+      - "mwdb/local-first/**"
+      - "mwdb/sync/**"
+      - "docs/MWDB-M4-SYNC-V0.md"
+      - ".github/workflows/mwdb-sync.yml"
+  pull_request:
+    paths:
+      - "mwdb/local-first/**"
+      - "mwdb/sync/**"
+      - "docs/MWDB-M4-SYNC-V0.md"
+      - ".github/workflows/mwdb-sync.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  test-local-first:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mwdb/local-first
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo test
+      - run: cargo check
+
+  test-sync:
+    runs-on: ubuntu-latest
+    needs: test-local-first
+    defaults:
+      run:
+        working-directory: mwdb/sync
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo test
+      - run: cargo check
