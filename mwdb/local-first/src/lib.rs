@@ -79,6 +79,19 @@ impl LogicalChangeV1 {
         change
     }
 
+    pub fn from_envelope(envelope: &ChangeEnvelope, logical_clock: u64, parents: Vec<Uuid>) -> Self {
+        Self::new(
+            envelope.change_id,
+            envelope.actor_id.clone(),
+            envelope.object_id.clone(),
+            envelope.operation.clone(),
+            envelope.payload.clone(),
+            envelope.created_at_ms,
+            logical_clock,
+            parents,
+        )
+    }
+
     pub fn compute_hash(&self) -> String {
         let canonical = serde_json::json!({
             "schema_version": self.schema_version,
@@ -97,6 +110,12 @@ impl LogicalChangeV1 {
     pub fn verify(&self) -> bool {
         self.content_hash == self.compute_hash()
     }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ChangeCheckpoint {
+    pub logical_clock: u64,
+    pub last_change_id: Option<Uuid>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -178,6 +197,41 @@ impl ChangeQueue {
 
     pub fn all(&self) -> &[ChangeEnvelope] {
         &self.changes
+    }
+
+    pub fn checkpoint(&self) -> ChangeCheckpoint {
+        ChangeCheckpoint {
+            logical_clock: self.changes.len() as u64,
+            last_change_id: self.changes.last().map(|change| change.change_id),
+        }
+    }
+
+    pub fn export_logical_v1(&self) -> Result<String, LocalFirstError> {
+        let mut output = String::new();
+        let mut previous = None;
+        for (index, envelope) in self.changes.iter().enumerate() {
+            let logical = LogicalChangeV1::from_envelope(
+                envelope,
+                index as u64 + 1,
+                previous.into_iter().collect(),
+            );
+            output.push_str(&serde_json::to_string(&logical)?);
+            output.push('\n');
+            previous = Some(envelope.change_id);
+        }
+        Ok(output)
+    }
+
+    pub fn verify_export(&self) -> Result<usize, LocalFirstError> {
+        let exported = self.export_logical_v1()?;
+        let mut verified = 0;
+        for line in exported.lines() {
+            let change: LogicalChangeV1 = serde_json::from_str(line)?;
+            if change.verify() {
+                verified += 1;
+            }
+        }
+        Ok(verified)
     }
 
     fn append(&mut self, record: &QueueRecord) -> Result<(), LocalFirstError> {
@@ -400,5 +454,33 @@ mod tests {
         let b = LogicalChangeV1::new(id, "actor", "object", "set", serde_json::json!({"b":2,"a":1}), 10, 3, vec![]);
         assert_eq!(a.content_hash, b.content_hash);
         assert!(a.verify());
+    }
+
+    #[test]
+    fn export_is_replayable_and_verified() {
+        let dir = tempdir().unwrap();
+        let mut q = ChangeQueue::open(dir.path().join("changes.log")).unwrap();
+        q.enqueue(ChangeEnvelope {
+            change_id: Uuid::new_v4(),
+            actor_id: "a".into(),
+            object_id: "one".into(),
+            operation: "set".into(),
+            payload: serde_json::json!(1),
+            created_at_ms: 1,
+        }).unwrap();
+        q.enqueue(ChangeEnvelope {
+            change_id: Uuid::new_v4(),
+            actor_id: "a".into(),
+            object_id: "two".into(),
+            operation: "set".into(),
+            payload: serde_json::json!(2),
+            created_at_ms: 2,
+        }).unwrap();
+        let export = q.export_logical_v1().unwrap();
+        let parsed = export.lines().map(|line| serde_json::from_str::<LogicalChangeV1>(line).unwrap()).collect::<Vec<_>>();
+        assert_eq!(parsed.len(), 2);
+        assert!(parsed.iter().all(LogicalChangeV1::verify));
+        assert_eq!(q.verify_export().unwrap(), 2);
+        assert_eq!(q.checkpoint().logical_clock, 2);
     }
 }
