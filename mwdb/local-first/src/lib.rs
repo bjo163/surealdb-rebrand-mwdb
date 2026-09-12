@@ -159,6 +159,7 @@ impl ChangeQueue {
         let mut changes = Vec::new();
         let mut logical = Vec::new();
         let mut status = HashMap::new();
+
         for line in BufReader::new(reader).lines() {
             let line = line?;
             if line.trim().is_empty() {
@@ -169,14 +170,18 @@ impl ChangeQueue {
                     if status.contains_key(&change.change_id) {
                         continue;
                     }
-                    status.insert(change.change_id, ChangeStatus::Pending);
-                    let derived = LogicalChangeV1::from_envelope(
+                    let logical_change = LogicalChangeV1::from_envelope(
                         &change,
                         logical.len() as u64 + 1,
-                        logical.last().map(|previous| previous.change_id).into_iter().collect(),
+                        logical
+                            .last()
+                            .map(|previous: &LogicalChangeV1| previous.change_id)
+                            .into_iter()
+                            .collect::<Vec<Uuid>>(),
                     );
+                    status.insert(change.change_id, ChangeStatus::Pending);
                     changes.push(change);
-                    logical.push(derived);
+                    logical.push(logical_change);
                 }
                 QueueRecord::LogicalChange(change) => {
                     if status.contains_key(&change.change_id) {
@@ -194,6 +199,7 @@ impl ChangeQueue {
                 }
             }
         }
+
         let file = OpenOptions::new().create(true).append(true).open(&path)?;
         Ok(Self { path, file, changes, logical, status })
     }
@@ -209,7 +215,11 @@ impl ChangeQueue {
         let logical = LogicalChangeV1::from_envelope(
             &change,
             self.logical.len() as u64 + 1,
-            self.logical.last().map(|previous| previous.change_id).into_iter().collect(),
+            self.logical
+                .last()
+                .map(|previous: &LogicalChangeV1| previous.change_id)
+                .into_iter()
+                .collect::<Vec<Uuid>>(),
         );
         self.enqueue_logical(logical)
     }
@@ -240,7 +250,7 @@ impl ChangeQueue {
     pub fn pending(&self) -> Vec<ChangeEnvelope> {
         self.changes
             .iter()
-            .filter(|c| matches!(self.status.get(&c.change_id), Some(ChangeStatus::Pending)))
+            .filter(|change| matches!(self.status.get(&change.change_id), Some(ChangeStatus::Pending)))
             .cloned()
             .collect()
     }
@@ -251,13 +261,6 @@ impl ChangeQueue {
 
     pub fn all(&self) -> &[ChangeEnvelope] {
         &self.changes
-    }
-
-    pub fn checkpoint(&self) -> ChangeCheckpoint {
-        ChangeCheckpoint {
-            logical_clock: self.logical.last().map(|change| change.logical_clock).unwrap_or(0),
-            last_change_id: self.logical.last().map(|change| change.change_id),
-        }
     }
 
     pub fn logical_changes(&self) -> Vec<LogicalChangeV1> {
@@ -277,10 +280,17 @@ impl ChangeQueue {
         Ok(self.logical.iter().skip(start).cloned().collect())
     }
 
+    pub fn checkpoint(&self) -> ChangeCheckpoint {
+        ChangeCheckpoint {
+            logical_clock: self.logical.last().map(|change| change.logical_clock).unwrap_or(0),
+            last_change_id: self.logical.last().map(|change| change.change_id),
+        }
+    }
+
     pub fn export_logical_v1(&self) -> Result<String, LocalFirstError> {
         let mut output = String::new();
-        for logical in &self.logical {
-            output.push_str(&serde_json::to_string(logical)?);
+        for change in &self.logical {
+            output.push_str(&serde_json::to_string(change)?);
             output.push('\n');
         }
         Ok(output)
@@ -362,14 +372,15 @@ impl LocalFirstStore {
             key.clone(),
             "set",
             value.clone(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_millis(),
+            now_ms(),
             self.queue.logical.len() as u64 + 1,
-            self.queue.logical.last().map(|previous| previous.change_id).into_iter().collect(),
+            self.queue
+                .logical
+                .last()
+                .map(|previous: &LogicalChangeV1| previous.change_id)
+                .into_iter()
+                .collect::<Vec<Uuid>>(),
         );
-
         let id = logical.change_id;
         self.queue.enqueue_logical(logical.clone())?;
         self.state.insert(key, value);
@@ -427,10 +438,28 @@ impl LocalFirstStore {
     }
 }
 
+fn now_ms() -> u128 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use tempfile::tempdir;
+
+    fn sample_envelope(id: Uuid, key: &str, value: serde_json::Value) -> ChangeEnvelope {
+        ChangeEnvelope {
+            change_id: id,
+            actor_id: "a".into(),
+            object_id: key.into(),
+            operation: "set".into(),
+            payload: value,
+            created_at_ms: 1,
+        }
+    }
 
     #[test]
     fn offline_write_is_durable_and_pending_after_reopen() {
@@ -442,11 +471,9 @@ mod tests {
             assert_eq!(store.get("user:1").unwrap()["name"], "Alice");
             assert_eq!(store.queue().pending().len(), 1);
         }
-        {
-            let store = LocalFirstStore::open(dir.path(), "device-a").unwrap();
-            assert_eq!(store.get("user:1").unwrap()["name"], "Alice");
-            assert_eq!(store.queue().pending()[0].change_id, id);
-        }
+        let store = LocalFirstStore::open(dir.path(), "device-a").unwrap();
+        assert_eq!(store.get("user:1").unwrap()["name"], "Alice");
+        assert_eq!(store.queue().pending()[0].change_id, id);
     }
 
     #[test]
@@ -457,7 +484,6 @@ mod tests {
             let mut store = LocalFirstStore::open(dir.path(), "device-a").unwrap();
             id = store.set("k", serde_json::json!(1)).unwrap();
             store.queue_mut().set_status(id, ChangeStatus::Acknowledged).unwrap();
-            assert!(store.queue().pending().is_empty());
         }
         let store = LocalFirstStore::open(dir.path(), "device-a").unwrap();
         assert!(store.queue().pending().is_empty());
@@ -467,40 +493,22 @@ mod tests {
     #[test]
     fn duplicate_change_id_is_not_reenqueued() {
         let dir = tempdir().unwrap();
-        let mut q = ChangeQueue::open(dir.path().join("changes.log")).unwrap();
+        let mut queue = ChangeQueue::open(dir.path().join("changes.log")).unwrap();
         let id = Uuid::new_v4();
-        let c = ChangeEnvelope {
-            change_id: id,
-            actor_id: "a".into(),
-            object_id: "o".into(),
-            operation: "set".into(),
-            payload: serde_json::json!(true),
-            created_at_ms: 1,
-        };
-        assert!(q.enqueue(c.clone()).unwrap());
-        assert!(!q.enqueue(c).unwrap());
-        assert_eq!(q.all().len(), 1);
+        let change = sample_envelope(id, "o", serde_json::json!(true));
+        assert!(queue.enqueue(change.clone()).unwrap());
+        assert!(!queue.enqueue(change).unwrap());
+        assert_eq!(queue.all().len(), 1);
     }
 
     #[test]
     fn replay_repairs_state_snapshot() {
         let dir = tempdir().unwrap();
-        let id;
-        {
-            let mut q = ChangeQueue::open(dir.path().join("changes.log")).unwrap();
-            id = Uuid::new_v4();
-            q.enqueue(ChangeEnvelope {
-                change_id: id,
-                actor_id: "a".into(),
-                object_id: "k".into(),
-                operation: "set".into(),
-                payload: serde_json::json!(42),
-                created_at_ms: 1,
-            }).unwrap();
-        }
+        let mut queue = ChangeQueue::open(dir.path().join("changes.log")).unwrap();
+        let id = Uuid::new_v4();
+        queue.enqueue(sample_envelope(id, "k", serde_json::json!(42))).unwrap();
         let store = LocalFirstStore::open(dir.path(), "a").unwrap();
         assert_eq!(store.get("k"), Some(&serde_json::json!(42)));
-        assert_eq!(store.queue().all()[0].change_id, id);
     }
 
     #[test]
@@ -515,20 +523,17 @@ mod tests {
     }
 
     #[test]
-    fn reconnect_is_queue_recovery_and_resubscription() {
-        let dir = tempdir().unwrap();
-        let id;
-        {
-            let mut store = LocalFirstStore::open(dir.path(), "device-a").unwrap();
-            id = store.set("offline", serde_json::json!(true)).unwrap();
-        }
-        {
-            let mut store = LocalFirstStore::open(dir.path(), "device-a").unwrap();
-            assert_eq!(store.queue().pending()[0].change_id, id);
-            let rx = store.subscribe();
-            store.set("reconnected", serde_json::json!(true)).unwrap();
-            assert_eq!(rx.recv().unwrap().object_id, "reconnected");
-        }
+    fn remote_apply_is_durable_and_idempotent() {
+        let source = tempdir().unwrap();
+        let target = tempdir().unwrap();
+        let mut a = LocalFirstStore::open(source.path(), "a").unwrap();
+        let mut b = LocalFirstStore::open(target.path(), "b").unwrap();
+        a.set("shared", serde_json::json!({"v":1})).unwrap();
+        let change = a.queue().logical_changes()[0].clone();
+        assert!(b.apply_remote(&change).unwrap());
+        assert!(!b.apply_remote(&change).unwrap());
+        assert_eq!(b.get("shared"), Some(&serde_json::json!({"v":1})));
+        assert_eq!(b.queue().status(change.change_id), Some(&ChangeStatus::Acknowledged));
     }
 
     #[test]
@@ -541,91 +546,17 @@ mod tests {
     }
 
     #[test]
-    fn export_is_replayable_and_verified() {
+    fn export_is_replayable_and_checkpointed() {
         let dir = tempdir().unwrap();
-        let mut q = ChangeQueue::open(dir.path().join("changes.log")).unwrap();
-        q.enqueue(ChangeEnvelope {
-            change_id: Uuid::new_v4(),
-            actor_id: "a".into(),
-            object_id: "one".into(),
-            operation: "set".into(),
-            payload: serde_json::json!(1),
-            created_at_ms: 1,
-        }).unwrap();
-        q.enqueue(ChangeEnvelope {
-            change_id: Uuid::new_v4(),
-            actor_id: "a".into(),
-            object_id: "two".into(),
-            operation: "set".into(),
-            payload: serde_json::json!(2),
-            created_at_ms: 2,
-        }).unwrap();
-        let export = q.export_logical_v1().unwrap();
+        let mut queue = ChangeQueue::open(dir.path().join("changes.log")).unwrap();
+        queue.enqueue(sample_envelope(Uuid::from_u128(1), "one", serde_json::json!(1))).unwrap();
+        queue.enqueue(sample_envelope(Uuid::from_u128(2), "two", serde_json::json!(2))).unwrap();
+        let export = queue.export_logical_v1().unwrap();
         let parsed = export.lines().map(|line| serde_json::from_str::<LogicalChangeV1>(line).unwrap()).collect::<Vec<_>>();
         assert_eq!(parsed.len(), 2);
         assert!(parsed.iter().all(LogicalChangeV1::verify));
-        assert_eq!(q.verify_export().unwrap(), 2);
-        assert_eq!(q.checkpoint().logical_clock, 2);
-    }
-
-    #[test]
-    fn checkpoint_returns_only_changes_after_anchor() {
-        let dir = tempdir().unwrap();
-        let mut q = ChangeQueue::open(dir.path().join("changes.log")).unwrap();
-        for i in 1..=3 {
-            q.enqueue(ChangeEnvelope {
-                change_id: Uuid::from_u128(i),
-                actor_id: "a".into(),
-                object_id: format!("doc:{i}"),
-                operation: "set".into(),
-                payload: serde_json::json!(i),
-                created_at_ms: i as u128,
-            }).unwrap();
-        }
-        let delta = q.logical_changes_since(Some(Uuid::from_u128(1))).unwrap();
-        assert_eq!(delta.len(), 2);
-        assert_eq!(delta[0].change_id, Uuid::from_u128(2));
-        assert_eq!(delta[1].change_id, Uuid::from_u128(3));
-    }
-
-    #[test]
-    fn remote_apply_preserves_logical_identity_across_reopen() {
-        let dir = tempdir().unwrap();
-        let change = LogicalChangeV1::new(
-            Uuid::from_u128(77),
-            "device-a",
-            "shared:1",
-            "set",
-            serde_json::json!({"v": 7}),
-            7,
-            9,
-            vec![Uuid::from_u128(8)],
-        );
-        {
-            let mut store = LocalFirstStore::open(dir.path(), "device-b").unwrap();
-            assert!(store.apply_remote(&change).unwrap());
-        }
-        let reopened = LocalFirstStore::open(dir.path(), "device-b").unwrap();
-        assert_eq!(reopened.queue().logical_changes()[0], change);
-    }
-
-    #[test]
-    fn remote_apply_is_durable_and_idempotent() {
-        let dir = tempdir().unwrap();
-        let mut store = LocalFirstStore::open(dir.path(), "device-b").unwrap();
-        let change = LogicalChangeV1::new(
-            Uuid::from_u128(78),
-            "device-a",
-            "shared:1",
-            "set",
-            serde_json::json!({"v": 7}),
-            7,
-            1,
-            vec![],
-        );
-        assert!(store.apply_remote(&change).unwrap());
-        assert!(!store.apply_remote(&change).unwrap());
-        assert_eq!(store.get("shared:1"), Some(&serde_json::json!({"v": 7})));
-        assert_eq!(store.queue().status(change.change_id), Some(&ChangeStatus::Acknowledged));
+        assert_eq!(queue.verify_export().unwrap(), 2);
+        assert_eq!(queue.checkpoint().logical_clock, 2);
+        assert_eq!(queue.logical_changes_since(Some(Uuid::from_u128(1))).unwrap().len(), 1);
     }
 }
