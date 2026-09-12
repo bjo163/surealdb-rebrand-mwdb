@@ -1,4 +1,10 @@
-use std::{collections::{HashMap, HashSet}, fs::{File, OpenOptions}, io::{BufRead, BufReader, Write}, path::{Path, PathBuf}};
+use std::{
+    collections::{HashMap, HashSet},
+    fs::{File, OpenOptions},
+    io::{BufRead, BufReader, Write},
+    path::{Path, PathBuf},
+    sync::mpsc::{self, Receiver, Sender},
+};
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -132,6 +138,7 @@ pub struct LocalFirstStore {
     state_path: PathBuf,
     state: serde_json::Map<String, serde_json::Value>,
     actor_id: String,
+    subscribers: Vec<Sender<ChangeEnvelope>>,
 }
 
 impl LocalFirstStore {
@@ -147,15 +154,21 @@ impl LocalFirstStore {
         };
         let queue = ChangeQueue::open(dir.join("changes.log"))?;
 
-        // The logical change log is authoritative for local mutations. This replay
-        // repairs a state snapshot that was written before a crash/restart boundary.
+        // The logical change log is authoritative for local mutations. Replaying it
+        // repairs a stale or missing snapshot after a crash/restart boundary.
         for change in queue.all() {
             if change.operation == "set" {
                 state.insert(change.object_id.clone(), change.payload.clone());
             }
         }
 
-        let store = Self { queue, state_path, state, actor_id: actor_id.into() };
+        let store = Self {
+            queue,
+            state_path,
+            state,
+            actor_id: actor_id.into(),
+            subscribers: Vec::new(),
+        };
         store.persist_state()?;
         Ok(store)
     }
@@ -178,13 +191,23 @@ impl LocalFirstStore {
                 .as_millis(),
         };
 
-        // Journal first: once the write is acknowledged by this API, the logical
-        // mutation is durable. The state snapshot can be reconstructed from it.
+        // Journal first. Once this returns Ok, the logical change is durable.
         let id = change.change_id;
-        self.queue.enqueue(change)?;
+        self.queue.enqueue(change.clone())?;
         self.state.insert(key, value);
         self.persist_state()?;
+        self.publish(change);
         Ok(id)
+    }
+
+    pub fn subscribe(&mut self) -> Receiver<ChangeEnvelope> {
+        let (tx, rx) = mpsc::channel();
+        self.subscribers.push(tx);
+        rx
+    }
+
+    fn publish(&mut self, change: ChangeEnvelope) {
+        self.subscribers.retain(|subscriber| subscriber.send(change.clone()).is_ok());
     }
 
     pub fn queue(&self) -> &ChangeQueue {
@@ -278,10 +301,37 @@ mod tests {
                 payload: serde_json::json!(42),
                 created_at_ms: 1,
             }).unwrap();
-            // Intentionally no state.json: recovery must rebuild it from the journal.
         }
         let store = LocalFirstStore::open(dir.path(), "a").unwrap();
         assert_eq!(store.get("k"), Some(&serde_json::json!(42)));
         assert_eq!(store.queue().all()[0].change_id, id);
+    }
+
+    #[test]
+    fn local_subscription_is_ordered() {
+        let dir = tempdir().unwrap();
+        let mut store = LocalFirstStore::open(dir.path(), "device-a").unwrap();
+        let rx = store.subscribe();
+        store.set("a", serde_json::json!(1)).unwrap();
+        store.set("b", serde_json::json!(2)).unwrap();
+        assert_eq!(rx.recv().unwrap().object_id, "a");
+        assert_eq!(rx.recv().unwrap().object_id, "b");
+    }
+
+    #[test]
+    fn reconnect_is_queue_recovery_and_resubscription() {
+        let dir = tempdir().unwrap();
+        let id;
+        {
+            let mut store = LocalFirstStore::open(dir.path(), "device-a").unwrap();
+            id = store.set("offline", serde_json::json!(true)).unwrap();
+        }
+        {
+            let mut store = LocalFirstStore::open(dir.path(), "device-a").unwrap();
+            assert_eq!(store.queue().pending()[0].change_id, id);
+            let rx = store.subscribe();
+            store.set("reconnected", serde_json::json!(true)).unwrap();
+            assert_eq!(rx.recv().unwrap().object_id, "reconnected");
+        }
     }
 }
