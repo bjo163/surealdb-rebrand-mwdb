@@ -1,0 +1,40 @@
+name: MW-DB Local-First Prototype
+
+on:
+  push:
+    paths:
+      - "mwdb/local-first/**"
+      - "docs/MWDB-M2-LOCAL-FIRST.md"
+      - ".github/workflows/mwdb-local-first.yml"
+  pull_request:
+    paths:
+      - "mwdb/local-first/**"
+      - "docs/MWDB-M2-LOCAL-FIRST.md"
+      - ".github/workflows/mwdb-local-first.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mwdb/local-first
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            mwdb/local-first/target
+          key: mwdb-local-first-${{ runner.os }}-${{ hashFiles('mwdb/local-first/Cargo.lock') }}
+          restore-keys: |
+            mwdb-local-first-${{ runner.os }}-
+      - name: Test
+        run: cargo test --locked
+      - name: Check
+        run: cargo check --locked
