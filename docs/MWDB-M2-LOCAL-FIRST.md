@@ -6,7 +6,7 @@ This document tracks the first executable MW-DB differentiation slice.
 
 ## M2-A — Local-first contract
 
-**Implemented in prototype:** `mwdb/local-first/src/lib.rs`
+Implemented in `mwdb/local-first/src/lib.rs`.
 
 Contract:
 
@@ -33,31 +33,44 @@ Implemented:
 
 Status: **DONE for prototype**
 
-## M2-C — Subscriptions/reconnect
+## M2-C — Subscriptions / reconnect
 
-Not implemented yet. The queue is intentionally transport-neutral.
-
-Next implementation should define:
+Implemented for the prototype:
 
 - local change notification
+- ordered local subscription delivery
+- subscriber cleanup after disconnect
+- reopen/reconnect fixture that recovers pending changes
+
+Not yet implemented:
+
 - remote-originated notification
-- deduplication
-- ordering guarantees
-- resubscription after reconnect
+- transport-level deduplication
+- explicit remote ordering contract
+- network reconnect protocol
 
-Status: **PLANNED**
+Status: **DONE for local prototype; PLANNED for transport integration**
 
-## M2-D — Deterministic offline harness
+## M2-D — Deterministic offline / recovery harness
 
-Prototype coverage currently includes restart, offline persistence, duplicate suppression, and acknowledgement recovery tests.
+Current prototype coverage:
+
+- offline write persistence
+- restart recovery
+- acknowledgement persistence
+- duplicate suppression
+- journal replay
+- local subscription ordering
+- reconnect fixture
+
+The repository also contains `.github/workflows/mwdb-local-first.yml` to verify this isolated crate.
 
 Remaining:
 
-- deterministic network-off toggle
-- reconnect simulation
-- retry schedule
-- transport fault injection
-- multi-replica scenario fixtures
+- deterministic network fault injection
+- reconnect retry schedule
+- multi-replica fixtures
+- CI result capture and regression gate
 
 Status: **IN PROGRESS**
 
@@ -82,4 +95,4 @@ open local
   -> show deterministic subscription behavior
 ```
 
-and all relevant failure/recovery tests pass.
+and all relevant failure/recovery tests pass in CI.
