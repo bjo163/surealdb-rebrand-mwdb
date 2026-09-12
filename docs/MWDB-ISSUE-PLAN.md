@@ -1,87 +1,250 @@
 # MW-DB Issue Plan
 
-GitHub Issues are currently disabled on this repository, so the executable issue backlog is recorded here until issue tracking is enabled. Each entry is intended to become one GitHub issue without changing scope.
+GitHub Issues are disabled in this repository at the time of writing, so this file is the executable backlog. When Issues are enabled, each `MW-*` entry can become one issue without changing scope.
 
-## M0-01 — Upstream baseline and provenance
+## M0 — Baseline / provenance
 
-Scope: record upstream commit/version, license/attribution inventory, and reproducible build/test baseline.
+### MW-001 — Record upstream baseline
+Scope: pin upstream repository, source commit/version, Rust toolchain, supported targets, and reproducible build/test commands.
+Acceptance: a fresh contributor can reproduce the baseline from documented steps.
+Files: `docs/`, repository metadata.
 
-Acceptance: a contributor can identify the upstream base and reproduce the baseline.
+### MW-002 — Build/test baseline report
+Scope: run and record core build, unit/integration, language-test, and benchmark baseline.
+Acceptance: green checks are recorded as green and failures are recorded with explicit disposition.
 
-## M1-01 — MW-DB branding and package map
+### MW-003 — License and attribution inventory
+Scope: map inherited licenses, notices, trademarks, generated assets, and redistribution constraints.
+Acceptance: every redistributed upstream component has a traceable license/notice source.
 
-Scope: define product naming, binary/package naming, and upstream-vs-MWDB ownership boundaries without destructive mass renaming.
+### MW-004 — Upstream/MW-DB ownership map
+Scope: classify directories/files as upstream, MW-DB, or integration-owned.
+Acceptance: future diffs can be classified without ambiguity.
 
-Acceptance: docs and package map consistently describe MW-DB while preserving upstream notices.
+## M1 — Branding / packaging
 
-## M2-01 — Local-first contract
+### MW-010 — MW-DB brand specification
+Scope: product naming, terminology, README identity, CLI/help wording, and documentation vocabulary.
+Acceptance: user-facing docs consistently identify MW-DB without falsely removing upstream provenance.
 
-Scope: define durable local state, offline reads/writes, acknowledgement rules, reconnect lifecycle, and subscription expectations.
+### MW-011 — Package/binary naming map
+Scope: Rust crate names, binary names, SDK package naming, compatibility aliases, and migration path.
+Acceptance: names are documented before mass package renames occur.
 
-Acceptance: contract is documented and a minimal end-to-end offline test passes.
+### MW-012 — Compatibility matrix
+Scope: document what remains compatible with upstream SurrealDB and what is intentionally MW-DB-specific.
+Acceptance: each public divergence has an explicit compatibility note.
 
-## M2-02 — Durable change queue
+## M2 — Local-first
 
-Scope: persist logical local changes with stable IDs and replay-safe state.
+### MW-020 — Local-first contract
+Scope: local reads, offline writes, durability-before-ack, restart behavior, reconnect lifecycle, and subscriptions.
+Acceptance: contract is testable and a minimal end-to-end offline scenario passes.
 
-Acceptance: restart and reconnect do not lose or duplicate acknowledged local changes.
+### MW-021 — Durable change queue
+Scope: persisted pending/sent/acknowledged/rejected/conflicted states with stable IDs.
+Acceptance: crash/restart does not lose acknowledged local changes or duplicate them.
 
-## M3-01 — Logical event/change model
+### MW-022 — Offline/online test harness
+Scope: deterministic network-off, reconnect, retry, and crash simulation.
+Acceptance: CI can execute representative offline scenarios deterministically.
 
-Scope: define change IDs, object identity, operation type, causal metadata, hash, actor, and replay semantics.
+### MW-023 — Subscription semantics
+Scope: local events, remote events, deduplication, ordering, and resubscription after reconnect.
+Acceptance: subscribers see deterministic, documented behavior.
 
-Acceptance: representative database mutations can be serialized, replayed, and reconstructed deterministically.
+## M3 — Logical changes / version graph
 
-## M4-01 — Sync protocol v0
+### MW-030 — Change envelope v0
+Scope: `change_id`, object/table identity, operation, payload/delta, actor, causal metadata, timestamps, parents, content hash.
+Acceptance: mutations serialize and deserialize with stable semantics.
 
-Scope: authenticated push/pull, idempotency, resumability, acknowledgements, and basic causal ordering.
+### MW-031 — Deterministic replay
+Scope: apply logical changes to rebuild representative state.
+Acceptance: same ordered change history yields byte-equivalent canonical state representation.
 
-Acceptance: two replicas synchronize after offline divergence without duplicate effects.
+### MW-032 — Change feed API
+Scope: inspect/export/import logical changes and checkpoints.
+Acceptance: a consumer can resume from a checkpoint without replaying already acknowledged changes.
 
-## M4-02 — Conflict policy and CRDT experiments
+## M4 — Sync / conflicts
 
-Scope: classify mergeable vs invariant-sensitive changes; prototype CRDTs only for well-defined structures.
+### MW-040 — Sync protocol v0
+Scope: authenticated session, push/pull, checkpoint, acknowledgement, retry, resume, idempotency.
+Acceptance: replicas converge after disconnect/reconnect without duplicate effects.
 
-Acceptance: conflict tests demonstrate deterministic outcomes and never silently discard changes.
+### MW-041 — Conflict taxonomy
+Scope: define mergeable, causally ordered, and invariant-sensitive conflicts.
+Acceptance: every tested conflict class has an explicit resolution policy.
 
-## M5-01 — Branch/snapshot/time-travel
+### MW-042 — CRDT experiments
+Scope: prototype only well-defined mergeable structures.
+Acceptance: merges are deterministic and tests prove no silent data loss.
 
-Scope: named database branches, snapshots, diff, restore, and merge/reject semantics.
+### MW-043 — Sync observability
+Scope: sync latency, queue depth, retries, conflicts, bytes transferred, convergence time.
+Acceptance: metrics exist for every sync state transition.
 
-Acceptance: a branch can diverge from a baseline, be inspected, and be merged or discarded safely.
+## M5 — Branching / time travel
 
-## M6-01 — Verification/provenance
+### MW-050 — Snapshot abstraction
+Scope: logical snapshot metadata and restore semantics.
+Acceptance: snapshot can be created and restored in test fixtures.
 
-Scope: content hashes, Merkle state roots, signed logical changes, inclusion proofs, and optional anchor interface.
+### MW-051 — Named branches
+Scope: isolated database histories.
+Acceptance: branch mutations do not alter parent state until merge.
 
-Acceptance: an independent verifier can validate change/state integrity without trusting the transport node.
+### MW-052 — Diff engine
+Scope: state and logical-change comparison.
+Acceptance: diff identifies additions, removals, updates, and conflicts correctly.
 
-## M7-01 — Federation and peer replication
+### MW-053 — Merge/reject/rollback
+Scope: branch review lifecycle.
+Acceptance: merge, reject, and rollback are atomic and recoverable in tests.
 
-Scope: peer identity, capabilities, authenticated replication, topology, and failure handling.
+### MW-054 — Agent sandbox branches
+Scope: branch permissions and lifecycle for agent experimentation.
+Acceptance: agent changes stay isolated and are emitted as reviewable change sets.
 
-Acceptance: independent nodes can exchange and validate state under partition/reconnect tests.
+## M6 — Verification / provenance
 
-## M8-01 — Adaptive trust and consistency policies
+### MW-060 — Canonical content hashing
+Scope: deterministic canonicalization and hash calculation.
+Acceptance: identical logical state produces identical hashes across supported targets.
 
-Scope: make consistency explicit per data semantics: local, mergeable/eventual, causal, serializable, or coordinated/BFT.
+### MW-061 — Merkle state root
+Scope: state/change Merkle construction and root calculation.
+Acceptance: roots are deterministic and efficiently recomputable.
 
-Acceptance: policies are represented in schema/data configuration and covered by semantic tests.
+### MW-062 — Signed changes
+Scope: actor identity and signatures for trusted/federated modes.
+Acceptance: tampered changes fail verification.
 
-## M9-01 — Agent-native data operations
+### MW-063 — Inclusion/state proofs
+Scope: generate and verify proofs independent of transport node.
+Acceptance: an external verifier can validate an included record/change.
 
-Scope: typed APIs for inspect, branch, propose, test, diff, merge, subscribe, and prove.
+### MW-064 — External anchor interface
+Scope: optional interface for anchoring state roots externally.
+Acceptance: anchoring is pluggable and not required for ordinary local operation.
 
-Acceptance: an agent can work entirely inside a branch and emit a reviewable, replayable change set.
+## M7 — Federation / distribution
 
-## M10-01 — Native-engine decision gate
+### MW-070 — Peer identity and capabilities
+Scope: authenticated peer IDs and capability negotiation.
+Acceptance: unsupported operations are rejected before state mutation.
 
-Scope: benchmark and review whether any substrate components should be replaced with MW-DB-native implementations.
+### MW-071 — Replication topology
+Scope: peer graph, roles, placement, and replica policy.
+Acceptance: topology can be represented and validated before deployment.
 
-Acceptance: decision is evidence-based and includes performance, maintenance, licensing, portability, and operational criteria.
+### MW-072 — Federated replication
+Scope: exchange signed logical changes across independently operated nodes.
+Acceptance: partition/reconnect scenarios converge or expose explicit unresolved conflicts.
 
-## Priority order
+### MW-073 — Failure/partition test suite
+Scope: simulated partitions, delays, duplicates, reordering, and node recovery.
+Acceptance: no unbounded silent divergence in tested scenarios.
 
-`M0-01 -> M1-01 -> M2-01/M2-02 -> M3-01 -> M4-01/M4-02 -> M5-01 -> M6-01 -> M7-01 -> M8-01 -> M9-01 -> M10-01`
+### MW-074 — Coordination/consensus abstraction
+Scope: pluggable coordination interface for data requiring stronger ordering.
+Acceptance: consensus dependency is explicit and isolated from local-first mode.
 
-Parallel work is safe within a milestone when APIs/contracts are frozen first. Do not start M7+ implementation by assumption; each milestone requires passing its exit criteria.
+## M8 — Adaptive trust / consistency
+
+### MW-080 — Consistency policy schema
+Scope: represent local, eventual/mergeable, causal, serializable, coordinated/BFT policies.
+Acceptance: policy is stored/configured alongside data semantics.
+
+### MW-081 — Policy enforcement
+Scope: reject operations that violate selected consistency guarantees.
+Acceptance: invariant-sensitive fixtures cannot be corrupted by a weaker policy.
+
+### MW-082 — Semantic consistency tests
+Scope: cross-mode consistency test matrix.
+Acceptance: each policy has positive and negative tests.
+
+## M9 — Agent-native data plane
+
+### MW-090 — Typed agent API
+Scope: inspect, query, mutate, branch, test, diff, propose, merge, subscribe, prove.
+Acceptance: API is capability-scoped and type-safe.
+
+### MW-091 — Agent permissions/sandbox
+Scope: least privilege and branch isolation.
+Acceptance: agent cannot mutate outside its granted scope.
+
+### MW-092 — Reviewable change-set format
+Scope: human-readable and machine-replayable proposed changes.
+Acceptance: changes can be reviewed before merge and replayed deterministically.
+
+## M10 — Native-engine decision gate
+
+### MW-100 — Comparative benchmark suite
+Scope: compare representative MW-DB workloads against relevant incumbent configurations.
+Acceptance: results are reproducible and include latency, throughput, storage, bandwidth, and recovery metrics.
+
+### MW-101 — Substrate gap analysis
+Scope: identify workload or architectural gaps that upstream reuse cannot solve cleanly.
+Acceptance: each proposed native component has evidence, estimated maintenance cost, and migration impact.
+
+### MW-102 — Native-engine decision ADR
+Scope: decide continue/replace/selectively-reimplement.
+Acceptance: decision cites benchmark and legal/operational constraints.
+
+## Dependency graph
+
+```text
+MW-001/002/003/004
+        |
+        v
+MW-010/011/012
+        |
+        v
+MW-020 -> MW-021 -> MW-022
+        |             |
+        +-> MW-023 ----+
+        |
+        v
+MW-030 -> MW-031 -> MW-032
+        |
+        v
+MW-040 -> MW-041 -> MW-042
+        |
+        +-> MW-043
+        |
+        v
+MW-050 -> MW-051 -> MW-052 -> MW-053
+                         |
+                         v
+                      MW-054
+        |
+        v
+MW-060 -> MW-061 -> MW-062 -> MW-063 -> MW-064
+        |
+        v
+MW-070 -> MW-071 -> MW-072 -> MW-073
+                           |
+                           v
+                        MW-074
+        |
+        v
+MW-080 -> MW-081 -> MW-082
+        |
+        v
+MW-090 -> MW-091 -> MW-092
+        |
+        v
+MW-100 -> MW-101 -> MW-102
+```
+
+## Current priority
+
+1. `MW-001..004` — establish baseline/provenance.
+2. `MW-010..012` — lock product identity and boundaries.
+3. `MW-020..023` — build the first real MW-DB capability: local-first.
+4. `MW-030..032` — make local changes portable and replayable.
+5. `MW-040..043` — sync and convergence.
+
+Do not begin M7+ implementation until M4/M6 contracts and failure tests are stable.
