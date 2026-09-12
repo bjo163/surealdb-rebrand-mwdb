@@ -7,15 +7,16 @@ This is the working dashboard for determining **where the project is now** and *
 - Repository: `bjo163/surealdb-rebrand-mwdb`
 - Branch: `main`
 - Substrate: existing SurrealDB Rust workspace
-- Current posture: upstream-derived research/product fork
-- GitHub Issues: disabled at time of roadmap authoring; executable issue plan is kept in `docs/MWDB-ISSUE-PLAN.md`.
+- MW-DB feature substrate: `mwdb/local-first`
+- Current posture: upstream-derived research/product fork with the first MW-DB local-first prototype implemented.
+- GitHub Issues: disabled; executable backlog remains in `docs/MWDB-ISSUE-PLAN.md`.
 
 ## Overall status
 
 ```text
 M0  Baseline / provenance       NEXT
 M1  Branding / packaging       NEXT
-M2  Local-first                NEXT ← first feature gate
+M2  Local-first                IN PROGRESS ← current feature gate
 M3  Logical changes            PLANNED
 M4  Sync / conflicts            PLANNED
 M5  Branch / time travel       PLANNED
@@ -25,8 +26,6 @@ M8  Adaptive trust              PLANNED
 M9  Agent-native                PLANNED
 M10 Native-engine decision      GATE
 ```
-
-The upstream substrate already supplies many mature database capabilities. Those are marked as **BASELINE**, not as completed MW-DB differentiation.
 
 ## Detailed matrix
 
@@ -38,12 +37,12 @@ The upstream substrate already supplies many mature database capabilities. Those
 | M1-A | Brand | MW-DB terminology and README identity | NEXT | brand/spec | coherent |
 | M1-B | Packaging | crate/binary/SDK naming map | NEXT | package map | coherent |
 | M1-C | Compatibility | upstream compatibility policy | NEXT | compatibility matrix | explicit |
-| M2-A | Local | local-first contract | NEXT | protocol/spec | tested |
-| M2-B | Local | durable pending-change queue | PLANNED | implementation | crash-safe |
-| M2-C | Local | local subscriptions/reconnect semantics | PLANNED | tests/API | deterministic |
-| M2-D | Local | offline harness | PLANNED | integration tests | repeatable |
-| M3-A | Events | logical change envelope | PLANNED | schema | versioned |
-| M3-B | Events | deterministic replay | PLANNED | replay tool/tests | reproducible |
+| M2-A | Local | local-first contract | DONE (prototype) | `mwdb/local-first` contract | tested |
+| M2-B | Local | durable pending-change queue | DONE (prototype) | append-only journal + status | crash-safe |
+| M2-C | Local | local subscriptions/reconnect semantics | PLANNED | API + tests | deterministic |
+| M2-D | Local | offline/recovery harness | IN PROGRESS | restart/replay tests | repeatable |
+| M3-A | Events | logical change envelope | BASELINE (prototype) | `ChangeEnvelope` v0 | versioned |
+| M3-B | Events | deterministic replay | PARTIAL (prototype) | startup journal replay | reproducible |
 | M3-C | Events | change feed/export/import | PLANNED | API | stable |
 | M4-A | Sync | push/pull/checkpoint/resume | PLANNED | sync v0 | convergent |
 | M4-B | Conflicts | conflict taxonomy | PLANNED | policy spec | explicit |
@@ -69,47 +68,60 @@ The upstream substrate already supplies many mature database capabilities. Those
 | M10-A | Engine | benchmark comparison | GATE | report | evidence |
 | M10-B | Engine | upstream/native decision | GATE | ADR | approved |
 
-## What is already reusable from upstream
+## Current implemented slice
 
-The current repository already contains a substantial Rust database platform including the core/query/server/types/workspace structure. This should be reused until evidence demonstrates a bottleneck or strategic constraint.
+```text
+LocalFirstStore
+      |
+      +-- state.json (rebuildable snapshot)
+      |
+      +-- changes.log (durable logical journal)
+              |
+              +-- ChangeEnvelope
+              +-- status records
+              +-- duplicate suppression
+              +-- replay on startup
+```
 
-Potentially reusable areas include:
+The journal is written and synced before `set()` returns. Startup replays logical changes so a crash between journal and snapshot persistence can be recovered.
 
-- query and parser infrastructure;
-- transactional/state engine;
-- indexes and storage backends;
-- server/network stack;
-- SDK/type layers;
-- WASM/embedded support;
-- existing language/integration tests.
+## Verification status
 
-These items are **not counted as MW-DB milestones complete** merely because they exist upstream.
+Prototype tests cover:
+
+- offline local write
+- restart persistence
+- acknowledgement persistence
+- duplicate change suppression
+- journal replay recovery
+
+The prototype has **not yet been claimed as fully verified by CI**, because the repo is primarily an upstream workspace and the new crate is intentionally isolated. The next execution task is to add deterministic CI execution for `mwdb/local-first` and complete M2-C/D.
 
 ## Definition of Done for a MW-DB milestone
 
 A milestone is `DONE` only when:
 
-1. the contract is documented;
+1. contract is documented;
 2. implementation exists where required;
 3. positive tests pass;
 4. failure/recovery tests pass where relevant;
 5. benchmark baseline exists;
 6. compatibility/migration impact is documented;
-7. the relevant issue/ADR is updated;
-8. the next milestone has an explicit dependency boundary.
+7. relevant issue/ADR is updated;
+8. next milestone has an explicit dependency boundary.
 
-## First implementation target
-
-Do not start with blockchain, P2P, or a native storage rewrite.
-
-The first meaningful MW-DB feature slice is:
+## Next execution target
 
 ```text
-M0 baseline
-  -> M1 identity
-  -> M2 local-first
-  -> M3 logical change
-  -> M4 sync
+M2-C subscription semantics
+       +
+M2-D deterministic offline/reconnect harness
+       ↓
+M3-A change envelope versioning
+       ↓
+M3-B replay/export/import
+       ↓
+M4 sync protocol
 ```
 
-This gives a usable vertical slice before decentralized complexity is introduced.
+Do not start blockchain, P2P, or a native storage rewrite before the local-first and logical-change contracts are stable.
