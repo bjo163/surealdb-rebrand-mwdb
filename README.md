@@ -40,6 +40,7 @@ mature SurrealDB substrate
           ├── logical change envelopes
           ├── checkpointed sync
           ├── conflict classification
+          ├── CRDT experiments
           ├── provenance / verification
           ├── branching / time travel
           └── agent-native data operations
@@ -74,26 +75,22 @@ MW-DB is **not** starting with a storage-engine rewrite, blockchain, or custom P
 - idempotent batch application;
 - persistent acknowledgement helpers;
 - conservative conflict classification;
-- a deterministic two-replica offline/reconnect fixture.
+- deterministic two-replica offline/reconnect fixture;
+- deterministic drop / duplicate / reorder fault harness.
 
-The current convergence test proves this path:
+### Conflict policy + CRDT lab
 
-```text
-       OFFLINE
-   ┌──────────────┐
-   │ Replica A    │  doc:a = 1
-   │ Replica B    │  doc:b = 2
-   └──────┬───────┘
-          │
-          │ reconnect + exchange deltas
-          ▼
-   ┌──────────────┐
-   │ both contain │
-   │ doc:a + doc:b│
-   └──────────────┘
-          │
-          └── retry same batch → no duplicate effect
-```
+M4 now includes an explicit conflict boundary:
+
+| Situation | Prototype policy |
+|---|---|
+| causally ordered changes | apply in logical order |
+| different objects | merge independently |
+| concurrent same object | surface conflict; never silently overwrite |
+
+There is also a standalone **G-Counter** experiment with per-actor state and max-based merge. Its tests cover the core CRDT properties of idempotence, commutativity, associativity, and preservation of the highest observed actor state.
+
+These CRDT experiments are intentionally **not** wired into ordinary whole-object `set` mutations yet.
 
 ## Architecture
 
@@ -106,15 +103,20 @@ MW-DB keeps concerns separated:
 | **Logical changes** | stable change identity + causal metadata |
 | **Sync** | checkpointed exchange + idempotent application |
 | **Conflict layer** | classify concurrent / causal relationships |
+| **CRDT lab** | typed experiments with deterministic merge semantics |
 | **Verification** | hashes, proofs, signatures (future) |
 | **Federation** | authenticated distributed transport (future) |
 | **Agent layer** | capability-scoped data operations (future) |
 
-### Important design rule
+### Important design rules
 
 **Physical WAL is not the sync protocol.**
 
 The sync layer operates on explicit logical changes so transport, recovery, verification, and future federation do not become coupled to one physical storage implementation.
+
+**Conflict is preferable to silent overwrite.**
+
+The prototype treats concurrent writes to the same object conservatively until a domain-specific merge rule is proven safe.
 
 ## Roadmap
 
@@ -123,7 +125,7 @@ M0  Baseline / provenance       ────────────────
 M1  Branding / packaging                        │
 M2  Local-first                 ██████████░░     │ active
 M3  Logical changes             ████████░░░░     │ active
-M4  Sync / conflicts            ██████░░░░░░     │ prototype
+M4  Sync / conflicts            ████████░░░░     │ prototype
 M5  Branch / time travel        ░░░░░░░░░░░░     │
 M6  Verification                ░░░░░░░░░░░░     │
 M7  Federation / distribution   ░░░░░░░░░░░░     │
@@ -134,7 +136,7 @@ M10 Native-engine decision      ◆ evidence gate │
 
 ### Current execution order
 
-`M2-022 → M3-031/032 → M4-041 → M4-042 → M4-043 → M7`
+`M2-022 → M3-031/032 → M4-042 → M4-043 → M7`
 
 The executable backlog lives in [`docs/MWDB-ISSUE-PLAN.md`](docs/MWDB-ISSUE-PLAN.md), while the architecture decision is recorded in [`docs/MWDB-ADR-0001-architecture-strategy.md`](docs/MWDB-ADR-0001-architecture-strategy.md).
 
@@ -150,7 +152,7 @@ cargo test
 cargo check
 ```
 
-### Run the sync prototype
+### Run the sync + CRDT prototype
 
 ```bash
 cd mwdb/sync
@@ -178,10 +180,11 @@ cd ../sync && cargo test && cargo check
 │   ├── MWDB-M2-LOCAL-FIRST.md
 │   ├── MWDB-M3-CHANGE-MODEL.md
 │   ├── MWDB-M4-SYNC-V0.md
+│   ├── MWDB-M4-CONFLICTS-CRDT-V0.md
 │   └── MWDB-ADR-0001-architecture-strategy.md
 ├── mwdb/
 │   ├── local-first/      # local durability + logical journal
-│   └── sync/             # checkpoint sync + convergence prototype
+│   └── sync/             # checkpoint sync + conflicts + CRDT lab
 └── .github/workflows/    # focused MW-DB CI
 ```
 
@@ -193,9 +196,11 @@ User-facing rebranding does **not** imply that upstream copyright, licensing, tr
 
 ## Current limitations
 
-This project still needs authenticated peer identity, network transport adapters, persisted remote resume state, deterministic network-fault injection, field-aware merge/CRDT experiments, canonical cross-language hashing, signed changes, and independent proof verification.
+MW-DB still needs authenticated peer identity, production network transport adapters, persisted remote resume state, real transport fault injection, field-aware merge/CRDT integration, canonical cross-language hashing, signed changes, and independent proof verification.
 
-Most importantly, **same-object concurrent writes are not silently merged today**. The prototype classifier treats them conservatively as `ConcurrentSameObject`.
+The M4 transport-neutral fault harness is test infrastructure, not a network simulator or production transport.
+
+Most importantly, **same-object concurrent writes are not silently merged today**. The prototype classifier treats them conservatively as `ConcurrentSameObject` and surfaces them for explicit resolution.
 
 ## Contributing
 
