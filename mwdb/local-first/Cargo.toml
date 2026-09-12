@@ -1,0 +1,16 @@
+[package]
+name = "mwdb-local-first"
+version = "0.1.0"
+edition = "2024"
+description = "MW-DB local-first durability and change queue prototype"
+license = "MIT"
+publish = false
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+uuid = { version = "1.0", features = ["v4", "serde"] }
+thiserror = "2.0"
+
+[dev-dependencies]
+tempfile = "3.0"
