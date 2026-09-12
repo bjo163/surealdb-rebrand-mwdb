@@ -64,13 +64,13 @@ Acceptance: crash/restart does not lose acknowledged local changes or duplicate 
 Status: PARTIAL
 Scope: deterministic network-off, reconnect, retry, and crash simulation.
 Acceptance: CI can execute representative offline scenarios deterministically.
-Current: restart/replay/reconnect fixtures exist; transport fault injection and multi-replica harness remain.
+Current: restart/replay/reconnect fixtures exist; real transport fault injection remains.
 
 ### MW-023 — Subscription semantics
 Status: DONE (prototype)
 Scope: local events, remote events, deduplication, ordering, and resubscription after reconnect.
 Acceptance: subscribers see deterministic, documented behavior.
-Current: ordered local subscriptions and reconnect resubscription fixture exist; remote-originated event semantics remain in M4.
+Current: ordered local subscriptions and remote-apply publication exist; full network event semantics remain M4/M7.
 
 ## M3 — Logical changes / version graph
 
@@ -83,26 +83,27 @@ Acceptance: mutations serialize and deserialize with stable semantics.
 Status: PARTIAL
 Scope: apply logical changes to rebuild representative state.
 Acceptance: same ordered change history yields byte-equivalent canonical state representation.
-Current: startup journal replay exists; full independent replay/export fixture remains.
+Current: startup journal replay exists; independent replay/import remains.
 
 ### MW-032 — Change feed API
 Status: PARTIAL
 Scope: inspect/export/import logical changes and checkpoints.
 Acceptance: a consumer can resume from a checkpoint without replaying already acknowledged changes.
-Current: logical JSONL export, validation, and checkpoint metadata exist; full import/resume API remains.
+Current: logical JSONL export, validation, checkpoint metadata, and checkpoint-based delta selection exist; full import/resume transport API remains.
 
 ## M4 — Sync / conflicts
 
 ### MW-040 — Sync protocol v0
-Status: PARTIAL
-Scope: authenticated session, push/pull, checkpoint, acknowledgement, retry, resume, idempotency.
-Acceptance: replicas converge after disconnect/reconnect without duplicate effects.
-Current: protocol envelope, encode/decode validation, idempotent apply, and persistent acknowledgement helpers exist; transport and convergence are next.
+Status: DONE (prototype)
+Scope: push/pull, checkpoint, acknowledgement, retry, resume, idempotency.
+Acceptance: a deterministic two-replica fixture converges after offline divergence and retry without duplicate effects.
+Current: protocol envelope, encode/decode verification, checkpoint delta selection, remote durable apply, persistent acknowledgements, and two-replica convergence fixture exist. Authentication and network transport remain.
 
 ### MW-041 — Conflict taxonomy
-Status: PLANNED
+Status: PARTIAL
 Scope: define mergeable, causally ordered, and invariant-sensitive conflicts.
 Acceptance: every tested conflict class has an explicit resolution policy.
+Current: conservative classifier covers causally ordered, different-object mergeable, and concurrent same-object cases; production resolution policy remains.
 
 ### MW-042 — CRDT experiments
 Status: PLANNED
@@ -249,6 +250,6 @@ Acceptance: decision cites benchmark and legal/operational constraints.
 
 ## Current execution priority
 
-`M2-022 -> M3-031/032 -> M4-040 -> M4-041/042 -> M4-043`
+`M2-022 -> M3-031/032 -> M4-041 -> M4-042 -> M4-043 -> M7`
 
-M2 local-first and M3 logical-change prototypes are now the active foundation. Do not claim M4 convergence until a real two-replica reconnect fixture passes.
+M4 checkpoint/delta exchange and a deterministic two-replica convergence fixture are now implemented as a prototype. Do not describe the system as production distributed replication until authenticated transport, resume state, partition/fault tests, and conflict/merge policies are complete.
