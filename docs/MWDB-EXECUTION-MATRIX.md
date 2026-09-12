@@ -8,7 +8,7 @@ This is the working dashboard for determining **where the project is now** and *
 - Branch: `main`
 - Substrate: existing SurrealDB Rust workspace
 - MW-DB feature substrate: `mwdb/local-first` + `mwdb/sync`
-- Current posture: upstream-derived research/product fork with local-first, logical-change, checkpoint-sync, and deterministic two-replica prototypes implemented.
+- Current posture: upstream-derived research/product fork with local-first, logical-change, checkpoint-sync, conflict classification, and deterministic two-replica prototypes implemented.
 - GitHub Issues: disabled; executable backlog remains in `docs/MWDB-ISSUE-PLAN.md`.
 
 ## Overall status
@@ -18,13 +18,13 @@ M0  Baseline / provenance       NEXT
 M1  Branding / packaging       NEXT
 M2  Local-first                IN PROGRESS
 M3  Logical changes            IN PROGRESS
-M4  Sync / conflicts            IN PROGRESS ← current feature gate
+M4  Sync / conflicts           IN PROGRESS ← current feature gate
 M5  Branch / time travel       PLANNED
-M6  Verification                PLANNED
-M7  Federation / distribution   PLANNED
-M8  Adaptive trust              PLANNED
-M9  Agent-native                PLANNED
-M10 Native-engine decision      GATE
+M6  Verification               PLANNED
+M7  Federation / distribution  PLANNED
+M8  Adaptive trust             PLANNED
+M9  Agent-native               PLANNED
+M10 Native-engine decision     GATE
 ```
 
 ## Detailed matrix
@@ -45,8 +45,10 @@ M10 Native-engine decision      GATE
 | M3-B | Events | deterministic replay | PARTIAL (prototype) | startup journal replay | reproducible |
 | M3-C | Events | change feed/export/import | PARTIAL (prototype) | export + checkpoint delta selection | resumable |
 | M4-A | Sync | push/pull/checkpoint/resume | DONE (prototype) | sync v0 + two-replica fixture | convergent |
-| M4-B | Conflicts | conflict taxonomy | PARTIAL (prototype) | conservative classifier | explicit |
+| M4-B | Conflicts | conflict taxonomy | DONE (prototype) | conservative classifier + policy | explicit |
 | M4-C | CRDT | mergeable-structure prototypes | PLANNED | test suite | deterministic |
+| M4-D | Resilience | drop/duplicate/reorder fault harness | DONE (prototype) | transport-neutral fault model | repeatable |
+| M4-E | Observability | sync state metrics | PLANNED | metrics contract | measurable |
 | M5-A | Versioning | snapshots | PLANNED | API/storage mapping | restorable |
 | M5-B | Versioning | named branches | PLANNED | API | isolated |
 | M5-C | Versioning | diff | PLANNED | change/state diff | accurate |
@@ -90,19 +92,21 @@ mwdb/sync
       |
       +-- SyncHello / SyncBatch / SyncAck
       +-- hash verification
+      +-- checkpoint-based selection
       +-- idempotent batch apply
       +-- persistent acknowledgement
-      +-- conflict classification
+      +-- conservative conflict classifier
       +-- two-replica convergence fixture
+      +-- drop/duplicate/reorder fault harness
 ```
 
 The journal is written and synced before `set()` returns. Startup replays logical changes so a crash between journal and snapshot persistence can be recovered.
 
 ## Verification status
 
-The current prototypes have focused tests covering offline writes, restart persistence, acknowledgement persistence, duplicate suppression, journal replay, ordered subscriptions, deterministic hashing, checkpoint deltas, verified remote apply, two-replica convergence, retry idempotency, and conservative conflict classification.
+The current prototypes have focused tests covering offline writes, restart persistence, acknowledgement persistence, duplicate suppression, journal replay, ordered subscriptions, deterministic hashing, checkpoint deltas, verified remote apply, two-replica convergence, retry idempotency, fault modeling, and conservative conflict classification.
 
-Dedicated GitHub Actions workflows exist for the local-first and sync crates. CI should be treated as the verification source of truth; no production-readiness claim is made from unit tests alone.
+Dedicated GitHub Actions workflows exist for the local-first and sync crates. CI is the verification source of truth; no production-readiness claim is made from unit tests alone.
 
 ## Next execution target
 
@@ -111,11 +115,11 @@ M2-D  deterministic fault/recovery harness
           ↓
 M3-B/C  independent replay + import/resume
           ↓
-M4-B/C  conflict policy + CRDT experiments
+M4-C   typed CRDT experiments
           ↓
-M4 observability / transport adapter
+M4-E   sync observability
           ↓
-M7 authenticated federation
+M7     authenticated federation
 ```
 
 Do not start blockchain, public P2P, or a native storage rewrite before the local-first, logical-change, and sync contracts are stable and supported by benchmarks.
