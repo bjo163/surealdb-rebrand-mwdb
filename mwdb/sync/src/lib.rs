@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 
 use mwdb_local_first::{
     ChangeEnvelope, ChangeQueue, ChangeStatus, LocalFirstError, LocalFirstStore, LogicalChangeV1,
@@ -57,7 +57,47 @@ pub enum ConflictClass {
     ConcurrentSameObject,
 }
 
-pub fn make_hello(node_id: impl Into<String>, checkpoint: mwdb_local_first::ChangeCheckpoint) -> SyncHello {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConflictPolicy {
+    ApplyOrdered,
+    AutoMerge,
+    SurfaceConflict,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct GCounter {
+    counts: BTreeMap<String, u64>,
+}
+
+impl GCounter {
+    pub fn increment(&mut self, actor_id: impl Into<String>, amount: u64) {
+        let actor_id = actor_id.into();
+        let current = self.counts.get(&actor_id).copied().unwrap_or(0);
+        self.counts.insert(actor_id, current.saturating_add(amount));
+    }
+
+    pub fn value(&self) -> u64 {
+        self.counts.values().copied().sum()
+    }
+
+    pub fn merge(&self, other: &Self) -> Self {
+        let mut merged = self.clone();
+        for (actor, value) in &other.counts {
+            let current = merged.counts.get(actor).copied().unwrap_or(0);
+            merged.counts.insert(actor.clone(), current.max(*value));
+        }
+        merged
+    }
+
+    pub fn actor_value(&self, actor_id: &str) -> u64 {
+        self.counts.get(actor_id).copied().unwrap_or(0)
+    }
+}
+
+pub fn make_hello(
+    node_id: impl Into<String>,
+    checkpoint: mwdb_local_first::ChangeCheckpoint,
+) -> SyncHello {
     SyncHello {
         protocol: SYNC_PROTOCOL_V1,
         node_id: node_id.into(),
@@ -66,17 +106,20 @@ pub fn make_hello(node_id: impl Into<String>, checkpoint: mwdb_local_first::Chan
     }
 }
 
-pub fn select_since(
-    queue: &ChangeQueue,
-    checkpoint: Option<Uuid>,
-) -> Result<SyncBatch, SyncError> {
+pub fn select_since(queue: &ChangeQueue, checkpoint: Option<Uuid>) -> Result<SyncBatch, SyncError> {
     let changes = queue.logical_changes_since(checkpoint)?;
-    Ok(SyncBatch { protocol: SYNC_PROTOCOL_V1, changes })
+    Ok(SyncBatch {
+        protocol: SYNC_PROTOCOL_V1,
+        changes,
+    })
 }
 
 pub fn encode_batch(batch: &SyncBatch) -> Result<Vec<u8>, SyncError> {
     if batch.protocol != SYNC_PROTOCOL_V1 {
-        return Err(SyncError::InvalidChange(format!("unsupported protocol {}", batch.protocol)));
+        return Err(SyncError::InvalidChange(format!(
+            "unsupported protocol {}",
+            batch.protocol
+        )));
     }
     for change in &batch.changes {
         validate_change(change)?;
@@ -87,7 +130,10 @@ pub fn encode_batch(batch: &SyncBatch) -> Result<Vec<u8>, SyncError> {
 pub fn decode_batch(bytes: &[u8]) -> Result<SyncBatch, SyncError> {
     let batch: SyncBatch = serde_json::from_slice(bytes)?;
     if batch.protocol != SYNC_PROTOCOL_V1 {
-        return Err(SyncError::InvalidChange(format!("unsupported protocol {}", batch.protocol)));
+        return Err(SyncError::InvalidChange(format!(
+            "unsupported protocol {}",
+            batch.protocol
+        )));
     }
     for change in &batch.changes {
         validate_change(change)?;
@@ -111,10 +157,7 @@ pub fn make_ack(accepted: Vec<Uuid>, rejected: Vec<Uuid>) -> SyncAck {
     }
 }
 
-pub fn apply_idempotently(
-    seen: &mut HashSet<Uuid>,
-    change: &LogicalChangeV1,
-) -> ApplyResult {
+pub fn apply_idempotently(seen: &mut HashSet<Uuid>, change: &LogicalChangeV1) -> ApplyResult {
     if let Err(error) = validate_change(change) {
         return ApplyResult::Rejected(error.to_string());
     }
@@ -129,27 +172,29 @@ pub fn apply_batch(
     seen: &mut HashSet<Uuid>,
     batch: &SyncBatch,
 ) -> Result<SyncAck, SyncError> {
+    if batch.protocol != SYNC_PROTOCOL_V1 {
+        return Err(SyncError::InvalidChange(format!(
+            "unsupported protocol {}",
+            batch.protocol
+        )));
+    }
+
     let mut accepted = Vec::new();
     let mut rejected = Vec::new();
-
     for change in &batch.changes {
         match apply_idempotently(seen, change) {
-            ApplyResult::Applied => {
-                match store.apply_remote(change) {
-                    Ok(true) => accepted.push(change.change_id),
-                    Ok(false) => accepted.push(change.change_id),
-                    Err(error) => {
-                        seen.remove(&change.change_id);
-                        rejected.push(change.change_id);
-                        return Err(SyncError::LocalFirst(error));
-                    }
+            ApplyResult::Applied => match store.apply_remote(change) {
+                Ok(true) | Ok(false) => accepted.push(change.change_id),
+                Err(error) => {
+                    seen.remove(&change.change_id);
+                    rejected.push(change.change_id);
+                    return Err(SyncError::LocalFirst(error));
                 }
-            }
+            },
             ApplyResult::Duplicate => accepted.push(change.change_id),
             ApplyResult::Rejected(_) => rejected.push(change.change_id),
         }
     }
-
     Ok(make_ack(accepted, rejected))
 }
 
@@ -174,6 +219,14 @@ pub fn classify(a: &LogicalChangeV1, b: &LogicalChangeV1) -> ConflictClass {
         ConflictClass::Mergeable
     } else {
         ConflictClass::ConcurrentSameObject
+    }
+}
+
+pub fn policy_for(class: ConflictClass) -> ConflictPolicy {
+    match class {
+        ConflictClass::CausallyOrdered => ConflictPolicy::ApplyOrdered,
+        ConflictClass::Mergeable => ConflictPolicy::AutoMerge,
+        ConflictClass::ConcurrentSameObject => ConflictPolicy::SurfaceConflict,
     }
 }
 
@@ -215,7 +268,13 @@ mod tests {
     use super::*;
     use tempfile::tempdir;
 
-    fn sample_change(id: Uuid, object: &str, value: i64, clock: u64, parents: Vec<Uuid>) -> LogicalChangeV1 {
+    fn sample_change(
+        id: Uuid,
+        object: &str,
+        value: i64,
+        clock: u64,
+        parents: Vec<Uuid>,
+    ) -> LogicalChangeV1 {
         LogicalChangeV1::new(
             id,
             "node-a",
@@ -231,7 +290,10 @@ mod tests {
     #[test]
     fn batch_round_trip_and_hash_verification() {
         let change = sample_change(Uuid::from_u128(1), "doc:1", 1, 1, vec![]);
-        let batch = SyncBatch { protocol: SYNC_PROTOCOL_V1, changes: vec![change.clone()] };
+        let batch = SyncBatch {
+            protocol: SYNC_PROTOCOL_V1,
+            changes: vec![change.clone()],
+        };
         let bytes = encode_batch(&batch).unwrap();
         assert_eq!(decode_batch(&bytes).unwrap().changes, vec![change]);
     }
@@ -240,7 +302,10 @@ mod tests {
     fn tampered_batch_is_rejected() {
         let mut change = sample_change(Uuid::from_u128(2), "doc:1", 1, 1, vec![]);
         change.payload = serde_json::json!({"v": 999});
-        let batch = SyncBatch { protocol: SYNC_PROTOCOL_V1, changes: vec![change] };
+        let batch = SyncBatch {
+            protocol: SYNC_PROTOCOL_V1,
+            changes: vec![change],
+        };
         assert!(encode_batch(&batch).is_err());
     }
 
@@ -256,10 +321,8 @@ mod tests {
     fn checkpoint_selection_is_incremental() {
         let dir = tempdir().unwrap();
         let mut queue = ChangeQueue::open(dir.path().join("changes.log")).unwrap();
-        let a = ChangeEnvelope { change_id: Uuid::from_u128(10), actor_id: "a".into(), object_id: "a".into(), operation: "set".into(), payload: serde_json::json!(1), created_at_ms: 1 };
-        let b = ChangeEnvelope { change_id: Uuid::from_u128(11), actor_id: "a".into(), object_id: "b".into(), operation: "set".into(), payload: serde_json::json!(2), created_at_ms: 2 };
-        queue.enqueue(a).unwrap();
-        queue.enqueue(b).unwrap();
+        queue.enqueue(ChangeEnvelope { change_id: Uuid::from_u128(10), actor_id: "a".into(), object_id: "a".into(), operation: "set".into(), payload: serde_json::json!(1), created_at_ms: 1 }).unwrap();
+        queue.enqueue(ChangeEnvelope { change_id: Uuid::from_u128(11), actor_id: "a".into(), object_id: "b".into(), operation: "set".into(), payload: serde_json::json!(2), created_at_ms: 2 }).unwrap();
         let batch = select_since(&queue, Some(Uuid::from_u128(10))).unwrap();
         assert_eq!(batch.changes.len(), 1);
         assert_eq!(batch.changes[0].change_id, Uuid::from_u128(11));
@@ -273,18 +336,14 @@ mod tests {
         let mut b = LocalFirstStore::open(b_dir.path(), "b").unwrap();
         let mut seen_a = HashSet::new();
         let mut seen_b = HashSet::new();
-
         a.set("doc:a", serde_json::json!({"v": 1})).unwrap();
         b.set("doc:b", serde_json::json!({"v": 2})).unwrap();
-
         let batch_a = select_since(a.queue(), None).unwrap();
         let batch_b = select_since(b.queue(), None).unwrap();
         apply_batch(&mut b, &mut seen_b, &batch_a).unwrap();
         apply_batch(&mut a, &mut seen_a, &batch_b).unwrap();
-
         assert_eq!(a.get("doc:a"), b.get("doc:a"));
         assert_eq!(a.get("doc:b"), b.get("doc:b"));
-
         apply_batch(&mut b, &mut seen_b, &batch_a).unwrap();
         apply_batch(&mut a, &mut seen_a, &batch_b).unwrap();
         assert_eq!(b.get("doc:a"), Some(&serde_json::json!({"v": 1})));
@@ -302,18 +361,48 @@ mod tests {
         let delivered = harness.deliver(&mut batches, true, true, true);
         assert_eq!(delivered.len(), 1);
         assert_eq!(harness.dropped_batches, 1);
+        assert_eq!(harness.duplicated_batches, 1);
         assert_eq!(harness.reordered_batches, 1);
     }
 
     #[test]
-    fn conflict_classification_is_conservative() {
+    fn conflict_policy_is_explicit_and_conservative() {
         let a = sample_change(Uuid::from_u128(30), "doc:a", 1, 1, vec![]);
         let b = sample_change(Uuid::from_u128(31), "doc:b", 2, 1, vec![]);
         let c = sample_change(Uuid::from_u128(32), "doc:a", 3, 1, vec![]);
         let d = sample_change(Uuid::from_u128(33), "doc:a", 4, 2, vec![a.change_id]);
         assert_eq!(classify(&a, &b), ConflictClass::Mergeable);
+        assert_eq!(policy_for(ConflictClass::Mergeable), ConflictPolicy::AutoMerge);
         assert_eq!(classify(&a, &c), ConflictClass::ConcurrentSameObject);
+        assert_eq!(policy_for(ConflictClass::ConcurrentSameObject), ConflictPolicy::SurfaceConflict);
         assert_eq!(classify(&a, &d), ConflictClass::CausallyOrdered);
+        assert_eq!(policy_for(ConflictClass::CausallyOrdered), ConflictPolicy::ApplyOrdered);
+    }
+
+    #[test]
+    fn g_counter_merge_is_idempotent_commutative_and_associative() {
+        let mut a = GCounter::default();
+        a.increment("a", 2);
+        let mut b = GCounter::default();
+        b.increment("b", 3);
+        let mut c = GCounter::default();
+        c.increment("c", 5);
+        assert_eq!(a.merge(&a), a);
+        assert_eq!(a.merge(&b), b.merge(&a));
+        assert_eq!(a.merge(&b).merge(&c), a.merge(&b.merge(&c)));
+        assert_eq!(a.merge(&b).value(), 5);
+        assert_eq!(a.merge(&b).merge(&c).value(), 10);
+    }
+
+    #[test]
+    fn g_counter_preserves_highest_per_actor_state() {
+        let mut low = GCounter::default();
+        low.increment("node-a", 2);
+        let mut high = low.clone();
+        high.increment("node-a", 5);
+        let merged = low.merge(&high);
+        assert_eq!(merged.actor_value("node-a"), 7);
+        assert_eq!(merged, high);
     }
 
     #[test]
