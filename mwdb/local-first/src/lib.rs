@@ -18,6 +18,10 @@ pub enum LocalFirstError {
     Serialization(#[from] serde_json::Error),
     #[error("change {0} does not exist")]
     UnknownChange(Uuid),
+    #[error("unsupported operation: {0}")]
+    UnsupportedOperation(String),
+    #[error("invalid logical change: {0}")]
+    InvalidLogicalChange(Uuid),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -206,18 +210,41 @@ impl ChangeQueue {
         }
     }
 
+    pub fn logical_changes(&self) -> Vec<LogicalChangeV1> {
+        let mut previous = None;
+        self.changes
+            .iter()
+            .enumerate()
+            .map(|(index, envelope)| {
+                let logical = LogicalChangeV1::from_envelope(
+                    envelope,
+                    index as u64 + 1,
+                    previous.into_iter().collect(),
+                );
+                previous = Some(envelope.change_id);
+                logical
+            })
+            .collect()
+    }
+
+    pub fn logical_changes_since(&self, last_change_id: Option<Uuid>) -> Result<Vec<LogicalChangeV1>, LocalFirstError> {
+        let changes = self.logical_changes();
+        let start = match last_change_id {
+            None => 0,
+            Some(id) => changes
+                .iter()
+                .position(|change| change.change_id == id)
+                .map(|index| index + 1)
+                .ok_or(LocalFirstError::UnknownChange(id))?,
+        };
+        Ok(changes.into_iter().skip(start).collect())
+    }
+
     pub fn export_logical_v1(&self) -> Result<String, LocalFirstError> {
         let mut output = String::new();
-        let mut previous = None;
-        for (index, envelope) in self.changes.iter().enumerate() {
-            let logical = LogicalChangeV1::from_envelope(
-                envelope,
-                index as u64 + 1,
-                previous.into_iter().collect(),
-            );
+        for logical in self.logical_changes() {
             output.push_str(&serde_json::to_string(&logical)?);
             output.push('\n');
-            previous = Some(envelope.change_id);
         }
         Ok(output)
     }
@@ -310,6 +337,32 @@ impl LocalFirstStore {
         self.persist_state()?;
         self.publish(change);
         Ok(id)
+    }
+
+    pub fn apply_remote(&mut self, change: &LogicalChangeV1) -> Result<bool, LocalFirstError> {
+        if change.schema_version != 1 || !change.verify() {
+            return Err(LocalFirstError::InvalidLogicalChange(change.change_id));
+        }
+        if self.queue.known_ids().contains(&change.change_id) {
+            return Ok(false);
+        }
+        if change.operation != "set" {
+            return Err(LocalFirstError::UnsupportedOperation(change.operation.clone()));
+        }
+        let envelope = ChangeEnvelope {
+            change_id: change.change_id,
+            actor_id: change.actor_id.clone(),
+            object_id: change.object_id.clone(),
+            operation: change.operation.clone(),
+            payload: change.payload.clone(),
+            created_at_ms: change.created_at_ms,
+        };
+        self.queue.enqueue(envelope.clone())?;
+        self.queue.set_status(change.change_id, ChangeStatus::Acknowledged)?;
+        self.state.insert(change.object_id.clone(), change.payload.clone());
+        self.persist_state()?;
+        self.publish(envelope);
+        Ok(true)
     }
 
     pub fn subscribe(&mut self) -> Receiver<ChangeEnvelope> {
@@ -482,5 +535,48 @@ mod tests {
         assert!(parsed.iter().all(LogicalChangeV1::verify));
         assert_eq!(q.verify_export().unwrap(), 2);
         assert_eq!(q.checkpoint().logical_clock, 2);
+    }
+
+    #[test]
+    fn checkpoint_returns_only_changes_after_anchor() {
+        let dir = tempdir().unwrap();
+        let mut q = ChangeQueue::open(dir.path().join("changes.log")).unwrap();
+        for i in 1..=3 {
+            q.enqueue(ChangeEnvelope {
+                change_id: Uuid::from_u128(i),
+                actor_id: "a".into(),
+                object_id: format!("doc:{i}"),
+                operation: "set".into(),
+                payload: serde_json::json!(i),
+                created_at_ms: i as u128,
+            }).unwrap();
+        }
+        let delta = q.logical_changes_since(Some(Uuid::from_u128(1))).unwrap();
+        assert_eq!(delta.len(), 2);
+        assert_eq!(delta[0].change_id, Uuid::from_u128(2));
+        assert_eq!(delta[1].change_id, Uuid::from_u128(3));
+    }
+
+    #[test]
+    fn remote_apply_is_durable_and_idempotent() {
+        let dir = tempdir().unwrap();
+        let mut store = LocalFirstStore::open(dir.path(), "device-b").unwrap();
+        let change = LogicalChangeV1::new(
+            Uuid::from_u128(77),
+            "device-a",
+            "shared:1",
+            "set",
+            serde_json::json!({"v": 7}),
+            7,
+            1,
+            vec![],
+        );
+        assert!(store.apply_remote(&change).unwrap());
+        assert!(!store.apply_remote(&change).unwrap());
+        assert_eq!(store.get("shared:1"), Some(&serde_json::json!({"v": 7})));
+        assert_eq!(store.queue().status(change.change_id), Some(&ChangeStatus::Acknowledged));
+        drop(store);
+        let reopened = LocalFirstStore::open(dir.path(), "device-b").unwrap();
+        assert_eq!(reopened.get("shared:1"), Some(&serde_json::json!({"v": 7})));
     }
 }
