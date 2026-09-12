@@ -1,165 +1,263 @@
 # MW-DB Milestones
 
-This roadmap is intentionally staged so the project gains useful capabilities early while preserving a path toward decentralized data.
+Status: active engineering roadmap.
 
-## M0 — Baseline & Upstream Boundary
+MW-DB is currently an upstream-derived research/product track. The repository already contains a large Rust/SurrealDB substrate. The milestone status below distinguishes **existing upstream capability** from **MW-DB-owned capability**.
 
-Goal: make the fork/rebrand understandable and reproducible.
+## Status legend
 
-Deliverables:
-- upstream commit/version record
-- license and attribution inventory
-- MW-DB naming policy
-- architecture map
-- benchmark baseline
-- CI/release baseline
+- `DONE`: evidenced in the current repository/docs and requires no new MW-DB implementation for that item.
+- `BASELINE`: existing upstream capability that MW-DB can reuse, but not yet an MW-DB contract.
+- `NEXT`: highest-priority MW-DB work.
+- `PLANNED`: not started as an MW-DB feature.
+- `GATE`: decision milestone; must be evidence-driven.
 
-Exit: repository can be rebuilt and its upstream delta can be explained.
+## M0 — Baseline, provenance, and upstream boundary
 
-## M1 — Branding & Packaging
+**Status: NEXT**
 
-Goal: introduce MW-DB identity without destructive rename churn.
+Objective: make the repository reproducible and define exactly what is inherited versus newly owned.
 
-Deliverables:
-- MW-DB README/docs identity
-- package/binary naming plan
-- compatibility matrix
-- upstream vs MW-DB ownership map
+### M0-A Repository baseline
+- Record upstream repository and pinned base commit/version.
+- Record toolchain/platform matrix.
+- Record build, unit, integration, language-test, and benchmark commands.
+- Record current green/red checks without hiding failures.
 
-Exit: a new contributor can tell what is upstream and what is MW-DB.
+### M0-B License/provenance map
+- Inventory LICENSE, NOTICE, copyright, trademarks, generated assets, and upstream links.
+- Document the exact license boundary for each inherited component.
+- Explicitly prohibit presenting upstream work as MW-DB-original work.
 
-## M2 — Local-First
+### M0-C Ownership map
+- Mark code/docs under `upstream`, `MW-DB`, and `integration` ownership.
+- Define the rule for upstream sync/cherry-pick versus MW-DB feature work.
 
-Goal: make local state a first-class execution mode.
+**Exit criteria:** a clean baseline report exists and a contributor can explain the upstream delta and license boundary.
 
-Deliverables:
-- local persistence contract
-- offline reads/writes
-- durable pending-change queue
-- reconnect semantics
-- client subscription model
-- local-first integration tests
+## M1 — Branding and packaging
 
-Exit: representative application workload works offline and converges after reconnect.
+**Status: NEXT**
 
-## M3 — Event / Version Graph
+Objective: establish MW-DB as the product identity without destructive renaming.
 
-Goal: give every logical mutation an auditable identity.
+### M1-A Brand surface
+- README identity.
+- Documentation identity.
+- CLI/help/version presentation plan.
+- Terminology glossary: MW-DB, engine, node, sync, branch, proof, peer.
 
-Deliverables:
-- stable event/change IDs
-- causal parents or logical clocks
-- actor identity
-- event hash
-- replay/rebuild tooling
-- change feed API
+### M1-B Package map
+- Decide canonical Rust crate names.
+- Decide binary names and compatibility aliases.
+- Decide npm/Python/Go/Rust SDK naming conventions.
 
-Exit: state can be reconstructed from a logical change history in tested scenarios.
+### M1-C Upstream compatibility
+- Keep upstream references where legally/technically required.
+- Define compatibility claims versus intentional divergence.
 
-## M4 — Sync / Conflict Engine
+**Exit criteria:** a new contributor can distinguish MW-DB from upstream SurrealDB within five minutes.
 
-Goal: turn local-first state into reliable multi-device state.
+## M2 — Local-first substrate
 
-Deliverables:
-- push/pull protocol
-- idempotent application of changes
-- resumable synchronization
-- conflict classification
-- merge policies
-- CRDT experiments for safe structures
+**Status: NEXT — FIRST FEATURE MILESTONE**
 
-Exit: two or more replicas converge under partition/reconnect test suites.
+Objective: make local durable state the primary execution target rather than a cache.
 
-## M5 — Branching / Time Travel
+### M2-A Local state contract
+- Local reads require no network.
+- Offline writes are permitted by policy.
+- Successful acknowledgement means durable local persistence.
+- Define restart behavior.
 
-Goal: make database state branchable like source code.
+### M2-B Durable pending changes
+- Stable local queue.
+- Persisted status: pending/sent/acknowledged/rejected/conflicted.
+- Replay-safe IDs.
 
-Deliverables:
-- snapshots
-- named branches
-- compare/diff
-- restore/rollback
-- branch merge
-- agent sandbox branch
+### M2-C Subscription semantics
+- Local subscription events.
+- Remote-originated events.
+- Reconnect/resubscription behavior.
 
-Exit: an application can create an isolated branch, mutate it, inspect differences, and merge/reject changes.
+### M2-D Test harness
+- Offline/online toggle.
+- Crash/restart simulation.
+- Deterministic fixture workload.
 
-## M6 — Verification / Provenance
+**Exit criteria:** a representative workload can read/write offline, restart safely, reconnect, and preserve acknowledged effects.
 
-Goal: make received data independently verifiable.
+## M3 — Logical event and version graph
 
-Deliverables:
-- content hashing
-- Merkle tree/state root
-- signed change records
-- proof generation and verification
-- optional external anchor interface
+**Status: PLANNED**
 
-Exit: a verifier can prove inclusion/integrity without trusting the transport node.
+Objective: create a logical change model independent from physical WAL records.
 
-## M7 — Federation / Distribution
+### M3-A Change envelope
+Minimum fields:
+`change_id`, `object_id`, `operation`, `payload/delta`, `actor`, `causal metadata`, `created_at`, `parents`, `content_hash`.
 
-Goal: support independent operators and distributed topology.
+### M3-B Replay engine
+- Serialize logical changes.
+- Apply changes deterministically.
+- Reconstruct state from a known history.
 
-Deliverables:
-- authenticated peers
-- replication topology
-- peer capabilities
-- placement policy
-- distributed failure tests
-- pluggable consensus interface
+### M3-C Change feed
+- Local change stream.
+- Export/import changes.
+- Version/history inspection.
 
-Exit: independent nodes can exchange authenticated state under tested failure scenarios.
+**Exit criteria:** representative mutations can be exported, replayed, and reconstructed deterministically.
 
-## M8 — Adaptive Trust & Consistency
+## M4 — Sync and conflict engine
 
-Goal: use the weakest coordination model that preserves application invariants.
+**Status: PLANNED**
+
+Objective: synchronize independent local replicas safely.
+
+### M4-A Sync protocol v0
+- Authenticated handshake.
+- Push/pull.
+- Cursor/checkpoint.
+- Acknowledgement.
+- Retry/resume.
+- Idempotent application.
+
+### M4-B Conflict classification
+Classify changes as:
+- mergeable,
+- ordered but mergeable,
+- invariant-sensitive/conflicting.
+
+### M4-C CRDT experiments
+Start only with structures where deterministic merge semantics are well-defined.
+
+**Exit criteria:** two or more replicas converge after partition/reconnect and no conflict is silently discarded.
+
+## M5 — Branch, snapshot, diff, and time travel
+
+**Status: PLANNED**
+
+Objective: treat database state as branchable history.
+
+### M5-A Snapshot primitives
+### M5-B Named branches
+### M5-C State/change diff
+### M5-D Restore/rollback
+### M5-E Merge/reject
+### M5-F Agent sandbox branch
+
+**Exit criteria:** a branch can diverge, be inspected, tested, merged, rejected, and safely discarded.
+
+## M6 — Verification and provenance
+
+**Status: PLANNED**
+
+Objective: make data independently verifiable.
+
+### M6-A Hash identity
+### M6-B Merkle state root
+### M6-C Signed changes
+### M6-D Inclusion/state proofs
+### M6-E Optional external anchoring API
+
+**Exit criteria:** an independent verifier can validate the integrity/inclusion of a received state or change without trusting the transport node.
+
+## M7 — Federation and distributed execution
+
+**Status: PLANNED**
+
+Objective: support independently operated nodes.
+
+### M7-A Peer identity/capabilities
+### M7-B Replication topology
+### M7-C Authenticated peer transport
+### M7-D Placement and routing policy
+### M7-E Partition/failure test matrix
+### M7-F Pluggable coordination/consensus interface
+
+**Exit criteria:** independent nodes can exchange authenticated state through tested partition/recovery scenarios.
+
+## M8 — Adaptive trust and consistency
+
+**Status: PLANNED**
+
+Objective: make consistency proportional to data semantics.
 
 Modes:
-- local
-- eventual/mergeable
-- causal
-- serializable
-- coordinated/BFT where required
+- local,
+- mergeable/eventual,
+- causal,
+- serializable,
+- coordinated/BFT.
 
-Exit: consistency policy is explicit, testable, and attached to data semantics rather than hidden global assumptions.
+### M8-A Schema/data consistency policy
+### M8-B Policy enforcement
+### M8-C Semantic test suite
+### M8-D Operational observability
 
-## M9 — Agent-Native Data Plane
+**Exit criteria:** consistency policy is explicit and testable rather than an implicit global setting.
 
-Goal: make database operations safe and useful for AI agents.
+## M9 — Agent-native data plane
+
+**Status: PLANNED**
+
+Objective: make database history, isolation, testing, and review safe for AI agents.
 
 Operations:
-- inspect
-- branch
-- query
-- mutate
-- test
-- diff
-- propose
-- merge
-- subscribe
-- prove
+`inspect`, `query`, `mutate`, `branch`, `test`, `diff`, `propose`, `merge`, `subscribe`, `prove`.
 
-Exit: an agent can work in an isolated branch and produce a reviewable, replayable change set.
+### M9-A Typed agent API
+### M9-B Agent permissions/sandbox
+### M9-C Reviewable change-set format
+### M9-D Agent replay/provenance
 
-## M10 — Native Engine Decision
+**Exit criteria:** an agent can work in an isolated branch and emit a reviewable, replayable change set.
 
-Goal: decide what, if anything, should become MW-DB-native.
+## M10 — Native-engine decision gate
 
-Decision inputs:
-- benchmarks
-- operational telemetry
-- maintenance cost
-- upstream dependency constraints
-- licensing/commercial requirements
-- workload gaps
+**Status: GATE**
 
-Exit: an evidence-backed decision to continue with upstream components, replace specific layers, or begin a native engine track.
+Objective: decide whether any subsystem should become MW-DB-native.
 
-## Priority rule
+Inputs:
+- performance benchmarks,
+- real workload telemetry,
+- maintenance cost,
+- upstream roadmap/dependency risk,
+- license/commercial constraints,
+- portability,
+- storage/network cost.
 
-The first competitive advantage is not raw benchmark speed. It is the combination of:
+Possible outcomes:
+1. remain upstream-derived,
+2. replace one specific subsystem,
+3. create a parallel MW-DB-native engine track.
 
-`local-first + incremental sync + versioning + verification + branching + federation`
+**Exit criteria:** documented decision with measurements and a migration plan, if any.
 
-Performance work follows real workloads and remains subject to regression benchmarks.
+## Execution order
+
+```text
+M0 baseline
+  -> M1 identity
+  -> M2 local-first
+  -> M3 logical changes
+  -> M4 sync/conflicts
+  -> M5 branches/time travel
+  -> M6 verification
+  -> M7 federation
+  -> M8 adaptive trust
+  -> M9 agents
+  -> M10 native-engine gate
+```
+
+Work may run in parallel **inside** a milestone after its contract is frozen. Do not parallelize cross-milestone implementations that can create incompatible data or protocol formats.
+
+## Competitive principle
+
+MW-DB does not win by cloning every feature of PostgreSQL, MongoDB, S3, Supabase, or Neon. The differentiation target is a coherent lifecycle:
+
+`local -> sync -> version -> branch -> verify -> federate -> decentralize`
+
+Performance competition follows real workload evidence.
