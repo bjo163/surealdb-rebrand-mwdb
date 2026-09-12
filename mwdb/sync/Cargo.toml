@@ -1,0 +1,17 @@
+[package]
+name = "mwdb-sync"
+version = "0.1.0"
+edition = "2024"
+description = "MW-DB sync protocol v0 prototype"
+publish = false
+
+[dependencies]
+mwdb-local-first = { path = "../local-first" }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "2.0"
+blake3 = "1.8"
+uuid = { version = "1.0", features = ["v4", "serde"] }
+
+[dev-dependencies]
+tempfile = "3.0"
