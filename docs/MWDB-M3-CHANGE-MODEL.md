@@ -1,10 +1,8 @@
 # M3 Logical Change Model
 
-Status: **PROTOTYPE / PARTIAL**
+Status: **IN PROGRESS — PROTOTYPE**
 
-## Purpose
-
-M3 defines a logical change format that is independent of the physical WAL/storage implementation. The format is intended to become the stable unit for future synchronization, replay, branching, verification, and federation.
+M3 defines a logical change format independent from the physical WAL/storage implementation. The format is the planned stable unit for synchronization, replay, branching, verification, and federation.
 
 ## `LogicalChangeV1`
 
@@ -13,7 +11,7 @@ schema_version
 change_id
 actor_id
 object_id
-action/operation
+operation
 payload
 created_at_ms
 logical_clock
@@ -21,7 +19,21 @@ parents[]
 content_hash
 ```
 
-The prototype currently lives in `mwdb/local-first/src/lib.rs`.
+Implemented in `mwdb/local-first/src/lib.rs`.
+
+## Implemented now
+
+- versioned `LogicalChangeV1` envelope
+- UUID change identity
+- actor/object/operation/payload fields
+- logical clock and causal parents
+- deterministic BLAKE3 content hash
+- hash verification
+- conversion from durable local `ChangeEnvelope`
+- logical JSONL export
+- export verification
+- checkpoint metadata
+- deterministic export/replay test fixture
 
 ## Design rules
 
@@ -30,17 +42,21 @@ The prototype currently lives in `mwdb/local-first/src/lib.rs`.
 - `parents` carry causal ancestry.
 - `logical_clock` provides an ordering signal without claiming global consensus.
 - `content_hash` is calculated from a deterministic canonical representation of the logical fields.
-- verification must fail when the signed/hashed content is modified.
 - physical WAL records remain an engine concern and are not exposed as the sync format.
 
-## Current evidence
+## Important prototype limitation
 
-The prototype contains deterministic hash generation and self-verification tests. Full replay/export/import remains M3 work.
+The current JSON representation is deterministic for the Rust prototype, but cross-language canonicalization is not frozen yet. A future protocol spec must define canonical serialization byte-for-byte before signatures or federation depend on it.
 
-## Next
+## Remaining M3 work
 
-1. freeze the V1 schema in a versioned protocol document;
-2. add canonical export/import;
-3. add deterministic replay against a small state machine;
-4. add checkpoint/cursor semantics;
-5. feed the resulting format into M4 sync.
+1. formal versioned protocol specification;
+2. canonical cross-language encoding;
+3. replay engine for arbitrary supported operations, not only `set`;
+4. import validation and idempotent ingestion;
+5. persistent checkpoints/cursors;
+6. change-feed API.
+
+## Gate
+
+M3 is complete when a known logical history can be exported, validated, imported, replayed, and reconstructed deterministically across supported implementations.
