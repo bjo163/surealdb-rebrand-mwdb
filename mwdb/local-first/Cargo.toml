@@ -5,7 +5,7 @@ name = "mwdb-local-first"
 version = "0.1.0"
 edition = "2024"
 description = "MW-DB local-first durability and change queue prototype"
-license = "MIT"
+license-file = "../../LICENSE"
 publish = false
 
 [dependencies]
