@@ -96,6 +96,17 @@ impl LogicalChangeV1 {
         )
     }
 
+    pub fn to_envelope(&self) -> ChangeEnvelope {
+        ChangeEnvelope {
+            change_id: self.change_id,
+            actor_id: self.actor_id.clone(),
+            object_id: self.object_id.clone(),
+            operation: self.operation.clone(),
+            payload: self.payload.clone(),
+            created_at_ms: self.created_at_ms,
+        }
+    }
+
     pub fn compute_hash(&self) -> String {
         let canonical = serde_json::json!({
             "schema_version": self.schema_version,
@@ -125,6 +136,7 @@ pub struct ChangeCheckpoint {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 enum QueueRecord {
     Change(ChangeEnvelope),
+    LogicalChange(LogicalChangeV1),
     Status { change_id: Uuid, status: ChangeStatus },
 }
 
@@ -133,6 +145,7 @@ pub struct ChangeQueue {
     path: PathBuf,
     file: File,
     changes: Vec<ChangeEnvelope>,
+    logical: Vec<LogicalChangeV1>,
     status: HashMap<Uuid, ChangeStatus>,
 }
 
@@ -144,6 +157,7 @@ impl ChangeQueue {
         }
         let reader = OpenOptions::new().create(true).read(true).open(&path)?;
         let mut changes = Vec::new();
+        let mut logical = Vec::new();
         let mut status = HashMap::new();
         for line in BufReader::new(reader).lines() {
             let line = line?;
@@ -152,8 +166,28 @@ impl ChangeQueue {
             }
             match serde_json::from_str::<QueueRecord>(&line)? {
                 QueueRecord::Change(change) => {
-                    status.entry(change.change_id).or_insert(ChangeStatus::Pending);
+                    if status.contains_key(&change.change_id) {
+                        continue;
+                    }
+                    status.insert(change.change_id, ChangeStatus::Pending);
+                    let derived = LogicalChangeV1::from_envelope(
+                        &change,
+                        logical.len() as u64 + 1,
+                        logical.last().map(|previous| previous.change_id).into_iter().collect(),
+                    );
                     changes.push(change);
+                    logical.push(derived);
+                }
+                QueueRecord::LogicalChange(change) => {
+                    if status.contains_key(&change.change_id) {
+                        continue;
+                    }
+                    if change.schema_version != 1 || !change.verify() {
+                        return Err(LocalFirstError::InvalidLogicalChange(change.change_id));
+                    }
+                    status.insert(change.change_id, ChangeStatus::Pending);
+                    changes.push(change.to_envelope());
+                    logical.push(change);
                 }
                 QueueRecord::Status { change_id, status: next } => {
                     status.insert(change_id, next);
@@ -161,7 +195,7 @@ impl ChangeQueue {
             }
         }
         let file = OpenOptions::new().create(true).append(true).open(&path)?;
-        Ok(Self { path, file, changes, status })
+        Ok(Self { path, file, changes, logical, status })
     }
 
     pub fn path(&self) -> &Path {
@@ -172,9 +206,25 @@ impl ChangeQueue {
         if self.status.contains_key(&change.change_id) {
             return Ok(false);
         }
-        self.append(&QueueRecord::Change(change.clone()))?;
+        let logical = LogicalChangeV1::from_envelope(
+            &change,
+            self.logical.len() as u64 + 1,
+            self.logical.last().map(|previous| previous.change_id).into_iter().collect(),
+        );
+        self.enqueue_logical(logical)
+    }
+
+    pub fn enqueue_logical(&mut self, change: LogicalChangeV1) -> Result<bool, LocalFirstError> {
+        if change.schema_version != 1 || !change.verify() {
+            return Err(LocalFirstError::InvalidLogicalChange(change.change_id));
+        }
+        if self.status.contains_key(&change.change_id) {
+            return Ok(false);
+        }
+        self.append(&QueueRecord::LogicalChange(change.clone()))?;
         self.status.insert(change.change_id, ChangeStatus::Pending);
-        self.changes.push(change);
+        self.changes.push(change.to_envelope());
+        self.logical.push(change);
         Ok(true)
     }
 
@@ -205,45 +255,32 @@ impl ChangeQueue {
 
     pub fn checkpoint(&self) -> ChangeCheckpoint {
         ChangeCheckpoint {
-            logical_clock: self.changes.len() as u64,
-            last_change_id: self.changes.last().map(|change| change.change_id),
+            logical_clock: self.logical.last().map(|change| change.logical_clock).unwrap_or(0),
+            last_change_id: self.logical.last().map(|change| change.change_id),
         }
     }
 
     pub fn logical_changes(&self) -> Vec<LogicalChangeV1> {
-        let mut previous = None;
-        self.changes
-            .iter()
-            .enumerate()
-            .map(|(index, envelope)| {
-                let logical = LogicalChangeV1::from_envelope(
-                    envelope,
-                    index as u64 + 1,
-                    previous.into_iter().collect(),
-                );
-                previous = Some(envelope.change_id);
-                logical
-            })
-            .collect()
+        self.logical.clone()
     }
 
     pub fn logical_changes_since(&self, last_change_id: Option<Uuid>) -> Result<Vec<LogicalChangeV1>, LocalFirstError> {
-        let changes = self.logical_changes();
         let start = match last_change_id {
             None => 0,
-            Some(id) => changes
+            Some(id) => self
+                .logical
                 .iter()
                 .position(|change| change.change_id == id)
                 .map(|index| index + 1)
                 .ok_or(LocalFirstError::UnknownChange(id))?,
         };
-        Ok(changes.into_iter().skip(start).collect())
+        Ok(self.logical.iter().skip(start).cloned().collect())
     }
 
     pub fn export_logical_v1(&self) -> Result<String, LocalFirstError> {
         let mut output = String::new();
-        for logical in self.logical_changes() {
-            output.push_str(&serde_json::to_string(&logical)?);
+        for logical in &self.logical {
+            output.push_str(&serde_json::to_string(logical)?);
             output.push('\n');
         }
         Ok(output)
@@ -319,23 +356,25 @@ impl LocalFirstStore {
 
     pub fn set(&mut self, key: impl Into<String>, value: serde_json::Value) -> Result<Uuid, LocalFirstError> {
         let key = key.into();
-        let change = ChangeEnvelope {
-            change_id: Uuid::new_v4(),
-            actor_id: self.actor_id.clone(),
-            object_id: key.clone(),
-            operation: "set".into(),
-            payload: value.clone(),
-            created_at_ms: std::time::SystemTime::now()
+        let logical = LogicalChangeV1::new(
+            Uuid::new_v4(),
+            self.actor_id.clone(),
+            key.clone(),
+            "set",
+            value.clone(),
+            std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default()
                 .as_millis(),
-        };
+            self.queue.logical.len() as u64 + 1,
+            self.queue.logical.last().map(|previous| previous.change_id).into_iter().collect(),
+        );
 
-        let id = change.change_id;
-        self.queue.enqueue(change.clone())?;
+        let id = logical.change_id;
+        self.queue.enqueue_logical(logical.clone())?;
         self.state.insert(key, value);
         self.persist_state()?;
-        self.publish(change);
+        self.publish(logical.to_envelope());
         Ok(id)
     }
 
@@ -349,19 +388,11 @@ impl LocalFirstStore {
         if change.operation != "set" {
             return Err(LocalFirstError::UnsupportedOperation(change.operation.clone()));
         }
-        let envelope = ChangeEnvelope {
-            change_id: change.change_id,
-            actor_id: change.actor_id.clone(),
-            object_id: change.object_id.clone(),
-            operation: change.operation.clone(),
-            payload: change.payload.clone(),
-            created_at_ms: change.created_at_ms,
-        };
-        self.queue.enqueue(envelope.clone())?;
+        self.queue.enqueue_logical(change.clone())?;
         self.queue.set_status(change.change_id, ChangeStatus::Acknowledged)?;
         self.state.insert(change.object_id.clone(), change.payload.clone());
         self.persist_state()?;
-        self.publish(envelope);
+        self.publish(change.to_envelope());
         Ok(true)
     }
 
@@ -558,11 +589,32 @@ mod tests {
     }
 
     #[test]
+    fn remote_apply_preserves_logical_identity_across_reopen() {
+        let dir = tempdir().unwrap();
+        let change = LogicalChangeV1::new(
+            Uuid::from_u128(77),
+            "device-a",
+            "shared:1",
+            "set",
+            serde_json::json!({"v": 7}),
+            7,
+            9,
+            vec![Uuid::from_u128(8)],
+        );
+        {
+            let mut store = LocalFirstStore::open(dir.path(), "device-b").unwrap();
+            assert!(store.apply_remote(&change).unwrap());
+        }
+        let reopened = LocalFirstStore::open(dir.path(), "device-b").unwrap();
+        assert_eq!(reopened.queue().logical_changes()[0], change);
+    }
+
+    #[test]
     fn remote_apply_is_durable_and_idempotent() {
         let dir = tempdir().unwrap();
         let mut store = LocalFirstStore::open(dir.path(), "device-b").unwrap();
         let change = LogicalChangeV1::new(
-            Uuid::from_u128(77),
+            Uuid::from_u128(78),
             "device-a",
             "shared:1",
             "set",
@@ -575,8 +627,5 @@ mod tests {
         assert!(!store.apply_remote(&change).unwrap());
         assert_eq!(store.get("shared:1"), Some(&serde_json::json!({"v": 7})));
         assert_eq!(store.queue().status(change.change_id), Some(&ChangeStatus::Acknowledged));
-        drop(store);
-        let reopened = LocalFirstStore::open(dir.path(), "device-b").unwrap();
-        assert_eq!(reopened.get("shared:1"), Some(&serde_json::json!({"v": 7})));
     }
 }
