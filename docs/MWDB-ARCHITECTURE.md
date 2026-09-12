@@ -1,60 +1,108 @@
 # MW-DB Architecture
 
-## Boundary model
+Status: architecture v0.2.
 
-MW-DB is a product architecture first and an engine fork second. The current codebase provides a mature Rust database substrate. New MW-DB functionality should be introduced at explicit boundaries so the substrate can be replaced later if evidence requires it.
+## 1. Architectural thesis
+
+MW-DB is a product/data-platform architecture first and an engine fork second. The current repository provides a mature Rust/SurrealDB substrate. MW-DB should add new capabilities at replaceable boundaries so the substrate can be changed later without rewriting application-facing contracts.
+
+The core lifecycle is:
 
 ```text
-Clients / Apps
-      |
-      v
-+---------------------+
-| MW-DB API / SDK     |
-+----------+----------+
-           |
-   +-------+--------+
-   | Query / Model  |
-   | Subscription   |
-   +-------+--------+
-           |
-   +-------+------------------------------+
-   |                                      |
-   v                                      v
-Local State                         Change/Event Log
-   |                                      |
-   +----------------+---------------------+
-                    |
-                    v
-               Sync Engine
-                    |
-          +---------+---------+
-          |                   |
-       Remote              Peer/Federation
-          |                   |
-          +---------+---------+
-                    |
-               Verification
-                    |
-              Storage Engine
-                    |
-             Storage Backends
+LOCAL -> SYNC -> VERSION -> BRANCH -> VERIFY -> FEDERATE -> DECENTRALIZE
 ```
 
-## Components
+## 2. Layered architecture
 
-### 1. Data API
+```text
++-------------------------------------------------------------+
+|                     Applications                            |
+|  Radicle / MW products / Web / Mobile / AI agents          |
++-----------------------------+-------------------------------+
+                              |
+                              v
++-------------------------------------------------------------+
+|                         MW-DB API                           |
+| query | write | subscribe | branch | sync | prove | merge  |
++-----------------------------+-------------------------------+
+                              |
+              +---------------+---------------+
+              |                               |
+              v                               v
++-------------------------+       +-------------------------+
+| Query / Model Plane     |       | Identity / Policy Plane |
+| SurrealQL initially     |       | actor | auth | ACL      |
+| relational/document     |       | trust mode | policy    |
+| graph/vector access     |       +-------------------------+
++------------+------------+
+             |
+             v
++-------------------------------------------------------------+
+|                       State Plane                           |
+| MVCC | transactions | indexes | subscriptions | cache       |
++---------------------------+---------------------------------+
+                            |
+             +--------------+--------------+
+             |                             |
+             v                             v
++-------------------------+      +----------------------------+
+| Local-First Plane       |      | Logical Change Plane       |
+| durable local state     |      | change IDs                 |
+| offline writes          |      | actor/causal metadata     |
+| pending queue           |      | hashes/signatures         |
++-------------+-----------+      +-------------+--------------+
+              |                                |
+              +---------------+----------------+
+                              v
+                    +---------------------+
+                    |     Sync Plane      |
+                    | push/pull/resume    |
+                    | idempotency         |
+                    | conflict handling   |
+                    +----------+----------+
+                               |
+              +----------------+----------------+
+              |                                 |
+              v                                 v
+   +---------------------+           +----------------------+
+   | Branch/Version     |           | Verification Plane   |
+   | snapshots          |           | hashes               |
+   | branches           |           | Merkle roots         |
+   | diff/merge         |           | proofs               |
+   | rollback           |           | optional anchoring   |
+   +---------------------+           +----------------------+
+              |
+              +----------------+----------------+
+                               v
+                    +---------------------+
+                    | Network / Federation|
+                    | peers | topology     |
+                    | replication | BFT    |
+                    +----------+----------+
+                               |
+                               v
+                    +---------------------+
+                    | Storage Substrate   |
+                    | existing engines    |
+                    | local / object / KV |
+                    +---------------------+
+```
 
-Stable application-facing API for reads, writes, queries, subscriptions, snapshots, branches, synchronization, and proofs.
+## 3. Planes and ownership
 
-### 2. Local state
+### 3.1 Query/model plane
 
-The local database is not treated as a cache. It is a durable execution target that must support useful work without a network connection.
+Purpose: application data access. Keep SurrealQL and existing SDKs initially. MW-DB additions should first be exposed as typed APIs/protocol operations rather than a new query grammar.
 
-### 3. Logical change log
+### 3.2 State plane
 
-Separate logical changes from physical WAL records. Physical WAL remains an engine implementation detail; MW-DB changes need stable identity and replication semantics.
+Purpose: transactional local state. Reuse the upstream engine capabilities. Do not duplicate MVCC or indexing prematurely.
 
-Minimum logical change fields:
+### 3.3 Logical change plane
+
+Purpose: stable cross-node semantics. This is distinct from physical WAL. A logical change is an application-level replication object.
+
+Minimum envelope:
 
 ```text
 change_id
@@ -64,81 +112,159 @@ payload or delta
 actor
 causal metadata
 created_at
-parent/change references
-content hash
+parents/change refs
+content_hash
 signature (when trust mode requires it)
 ```
 
-### 4. Sync engine
+### 3.4 Local-first plane
 
-Responsibilities include discovery, push/pull, resumability, idempotency, backpressure, acknowledgement, causal ordering, and conflict handling.
+The local DB is a durable execution target, not a cache.
 
-### 5. Conflict engine
+Required guarantees:
+1. local read without network;
+2. permitted offline writes;
+3. durable persistence before acknowledgement;
+4. restart-safe pending state;
+5. deterministic local subscriptions.
 
-Conflict policy is explicit. Mergeable state may use CRDT techniques; invariant-sensitive transactions must use stronger coordination.
+### 3.5 Sync plane
 
-### 6. Version/branch engine
+Responsibilities:
+- peer/session authentication,
+- capability negotiation,
+- checkpoints/cursors,
+- push/pull,
+- resumability,
+- idempotency,
+- acknowledgement,
+- backpressure,
+- causal ordering,
+- conflict reporting.
 
-Snapshots and branches are logical database states. They enable experimentation, review, rollback, and agent sandboxes.
+### 3.6 Branch/version plane
 
-### 7. Verification engine
+Represents named logical database states. Branching is intended for users, tests, previews, and AI agents.
 
-Supports hashes, Merkle state, signed changes, inclusion proofs, and optional external anchoring.
+Required operations:
+`create`, `snapshot`, `diff`, `restore`, `merge`, `reject`, `delete`.
 
-### 8. Network/federation
+### 3.7 Verification plane
 
-A later layer for authenticated peers, independent operators, topology management, and consensus/coordination.
+Provides independent integrity checks. Cryptographic proofs are not required for every deployment.
 
-## Trust modes
+Progression:
+
+```text
+hash -> Merkle root -> inclusion proof -> signed state -> optional external anchor
+```
+
+### 3.8 Network/federation plane
+
+Later-stage protocol for independent operators. Network transport must remain separate from state semantics so local testing can exercise the same logical protocol without a live WAN.
+
+## 4. Trust modes
 
 ```text
 LOCAL
-  single authority; no network dependency
+  One local authority. No network requirement.
 
 REPLICATED
-  configured replicas; operationally coordinated
+  A configured set of replicas share state under an operational coordinator.
 
 FEDERATED
-  independent operators; signed changes and explicit trust
+  Independent operators exchange authenticated/signed changes.
 
 DECENTRALIZED
-  no assumed single authority; consensus/verification are protocol concerns
+  No single operator is assumed authoritative; verification and coordination are protocol-level concerns.
 ```
 
-## Storage strategy
+Trust mode must not alter application data APIs.
 
-The initial release should use existing storage engines. Possible future adapters include local files, SSD/NVMe, object storage, and content-addressed storage. Storage choice must not leak into the application API.
+## 5. Consistency model
 
-## Query strategy
-
-Keep SurrealQL as the initial query language. Add new capability through APIs/protocols first. A new query dialect is deferred until there is a demonstrated need for syntax that cannot be expressed cleanly by current primitives.
-
-## ORM/SDK strategy
-
-Use the existing SDK ecosystem initially. Long term, define an MW schema representation that can generate typed clients for TypeScript, Rust, Go, and Python. Generated clients must preserve the same local-first/sync semantics.
-
-## Radicle integration target
-
-Radicle is an early integration laboratory:
+MW-DB should not force one global consistency model.
 
 ```text
-repository state
-      -> local MW-DB
-      -> logical changes
-      -> peer sync
-      -> merge/review
-      -> verification
+mergeable -> CRDT / deterministic merge
+causal    -> causal ordering
+critical  -> serializable/coordinated transaction
+multi-org -> federation policy
 ```
 
-Radicle-specific logic must remain an integration consumer, not become part of the generic database core.
+The schema/data policy identifies the required semantics. The engine selects the minimum coordination necessary to preserve invariants.
 
-## Architectural invariants
+## 6. Storage strategy
+
+Initial MW-DB releases reuse existing storage engines. Storage remains an adapter boundary.
+
+Potential backends:
+- embedded/local filesystem,
+- SSD/NVMe,
+- distributed KV,
+- object storage,
+- content-addressed storage.
+
+No application API may depend on a specific backend.
+
+## 7. Query and ORM strategy
+
+### Initial
+- SurrealQL remains the query language.
+- Existing SDKs remain valid.
+- New capabilities are APIs/protocols first.
+
+### Target
+A canonical MW schema can generate typed clients for TypeScript, Rust, Go, and Python. Generated clients must preserve transaction, local-first, sync, conflict, and branch semantics.
+
+### Deferred
+A distinct MWQL syntax is deferred until real workloads prove that current query primitives cannot express a capability cleanly.
+
+## 8. Radicle integration boundary
+
+Radicle is an integration laboratory, not a dependency of the generic database core.
+
+```text
+Radicle repo state
+      |
+      v
+  local MW-DB
+      |
+      v
+ logical changes
+      |
+      v
+   peer sync
+      |
+      v
+ merge / review
+      |
+      v
+ verification
+```
+
+## 9. Evidence gates
+
+Every new subsystem must have:
+
+- a written contract;
+- deterministic tests;
+- failure/recovery tests where applicable;
+- performance baseline;
+- interoperability test;
+- migration/compatibility story.
+
+No decentralized feature is considered complete merely because a demo works.
+
+## 10. Architectural invariants
 
 1. Local reads do not require a network.
 2. Offline writes are durable before acknowledgement.
 3. Logical changes have stable identifiers.
-4. Synchronization is incremental and resumable.
-5. Conflicts are observable and policy-driven.
-6. Verification does not depend on the transport node being trusted.
-7. Public MW-DB contracts do not expose an irreversible dependency on one storage backend.
-8. Upstream license/attribution notices remain intact.
+4. Sync is incremental, resumable, and idempotent.
+5. Conflicts are explicit and policy-driven.
+6. Verification can operate independently of the transport node.
+7. Public MW-DB contracts do not permanently expose one storage implementation.
+8. Upstream attribution/license obligations remain intact.
+9. Radicle-specific concerns stay out of the generic core.
+10. Native engine replacement is an evidence-based milestone, not an assumption.
