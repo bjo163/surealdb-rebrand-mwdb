@@ -39,6 +39,67 @@ pub struct ChangeEnvelope {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct LogicalChangeV1 {
+    pub schema_version: u16,
+    pub change_id: Uuid,
+    pub actor_id: String,
+    pub object_id: String,
+    pub operation: String,
+    pub payload: serde_json::Value,
+    pub created_at_ms: u128,
+    pub logical_clock: u64,
+    pub parents: Vec<Uuid>,
+    pub content_hash: String,
+}
+
+impl LogicalChangeV1 {
+    pub fn new(
+        change_id: Uuid,
+        actor_id: impl Into<String>,
+        object_id: impl Into<String>,
+        operation: impl Into<String>,
+        payload: serde_json::Value,
+        created_at_ms: u128,
+        logical_clock: u64,
+        parents: Vec<Uuid>,
+    ) -> Self {
+        let mut change = Self {
+            schema_version: 1,
+            change_id,
+            actor_id: actor_id.into(),
+            object_id: object_id.into(),
+            operation: operation.into(),
+            payload,
+            created_at_ms,
+            logical_clock,
+            parents,
+            content_hash: String::new(),
+        };
+        change.content_hash = change.compute_hash();
+        change
+    }
+
+    pub fn compute_hash(&self) -> String {
+        let canonical = serde_json::json!({
+            "schema_version": self.schema_version,
+            "change_id": self.change_id,
+            "actor_id": self.actor_id,
+            "object_id": self.object_id,
+            "operation": self.operation,
+            "payload": self.payload,
+            "created_at_ms": self.created_at_ms,
+            "logical_clock": self.logical_clock,
+            "parents": self.parents,
+        });
+        blake3::hash(canonical.to_string().as_bytes()).to_hex().to_string()
+    }
+
+    pub fn verify(&self) -> bool {
+        self.content_hash == self.compute_hash()
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 enum QueueRecord {
     Change(ChangeEnvelope),
     Status { change_id: Uuid, status: ChangeStatus },
@@ -154,8 +215,6 @@ impl LocalFirstStore {
         };
         let queue = ChangeQueue::open(dir.join("changes.log"))?;
 
-        // The logical change log is authoritative for local mutations. Replaying it
-        // repairs a stale or missing snapshot after a crash/restart boundary.
         for change in queue.all() {
             if change.operation == "set" {
                 state.insert(change.object_id.clone(), change.payload.clone());
@@ -191,7 +250,6 @@ impl LocalFirstStore {
                 .as_millis(),
         };
 
-        // Journal first. Once this returns Ok, the logical change is durable.
         let id = change.change_id;
         self.queue.enqueue(change.clone())?;
         self.state.insert(key, value);
@@ -333,5 +391,14 @@ mod tests {
             store.set("reconnected", serde_json::json!(true)).unwrap();
             assert_eq!(rx.recv().unwrap().object_id, "reconnected");
         }
+    }
+
+    #[test]
+    fn logical_change_hash_is_deterministic_and_verifiable() {
+        let id = Uuid::nil();
+        let a = LogicalChangeV1::new(id, "actor", "object", "set", serde_json::json!({"b":2,"a":1}), 10, 3, vec![]);
+        let b = LogicalChangeV1::new(id, "actor", "object", "set", serde_json::json!({"b":2,"a":1}), 10, 3, vec![]);
+        assert_eq!(a.content_hash, b.content_hash);
+        assert!(a.verify());
     }
 }
