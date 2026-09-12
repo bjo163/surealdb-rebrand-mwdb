@@ -31,10 +31,10 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             mwdb/local-first/target
-          key: mwdb-local-first-${{ runner.os }}-${{ hashFiles('mwdb/local-first/Cargo.lock') }}
+          key: mwdb-local-first-${{ runner.os }}-${{ hashFiles('mwdb/local-first/Cargo.toml') }}
           restore-keys: |
             mwdb-local-first-${{ runner.os }}-
       - name: Test
-        run: cargo test --locked
+        run: cargo test
       - name: Check
-        run: cargo check --locked
+        run: cargo check
