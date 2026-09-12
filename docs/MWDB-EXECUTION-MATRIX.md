@@ -7,8 +7,8 @@ This is the working dashboard for determining **where the project is now** and *
 - Repository: `bjo163/surealdb-rebrand-mwdb`
 - Branch: `main`
 - Substrate: existing SurrealDB Rust workspace
-- MW-DB feature substrate: `mwdb/local-first`
-- Current posture: upstream-derived research/product fork with the first local-first and logical-change prototypes implemented.
+- MW-DB feature substrate: `mwdb/local-first` + `mwdb/sync`
+- Current posture: upstream-derived research/product fork with local-first, logical-change, checkpoint-sync, and deterministic two-replica prototypes implemented.
 - GitHub Issues: disabled; executable backlog remains in `docs/MWDB-ISSUE-PLAN.md`.
 
 ## Overall status
@@ -16,9 +16,9 @@ This is the working dashboard for determining **where the project is now** and *
 ```text
 M0  Baseline / provenance       NEXT
 M1  Branding / packaging       NEXT
-M2  Local-first                IN PROGRESS ← current feature gate
+M2  Local-first                IN PROGRESS
 M3  Logical changes            IN PROGRESS
-M4  Sync / conflicts            PLANNED
+M4  Sync / conflicts            IN PROGRESS ← current feature gate
 M5  Branch / time travel       PLANNED
 M6  Verification                PLANNED
 M7  Federation / distribution   PLANNED
@@ -34,18 +34,18 @@ M10 Native-engine decision      GATE
 | M0-A | Baseline | reproducible build/test/toolchain record | NEXT | baseline report | reproducible |
 | M0-B | Legal | license/attribution inventory | NEXT | provenance map | reviewed |
 | M0-C | Architecture | upstream/MW-DB ownership map | NEXT | ownership contract | reviewed |
-| M1-A | Brand | MW-DB terminology and README identity | NEXT | brand/spec | coherent |
+| M1-A | Brand | MW-DB terminology and README identity | DONE (prototype) | brand/README baseline | coherent |
 | M1-B | Packaging | crate/binary/SDK naming map | NEXT | package map | coherent |
 | M1-C | Compatibility | upstream compatibility policy | NEXT | compatibility matrix | explicit |
 | M2-A | Local | local-first contract | DONE (prototype) | `mwdb/local-first` contract | tested |
 | M2-B | Local | durable pending-change queue | DONE (prototype) | append-only journal + status | crash-safe |
-| M2-C | Local | local subscriptions/reconnect semantics | DONE (prototype) | ordered local subscriptions + resubscribe fixture | deterministic |
-| M2-D | Local | offline/recovery harness | IN PROGRESS | restart/replay fixtures + CI workflow | repeatable |
+| M2-C | Local | local subscriptions/reconnect semantics | DONE (prototype) | ordered local subscriptions + remote apply | deterministic |
+| M2-D | Local | offline/recovery harness | IN PROGRESS | restart/replay/reconnect fixtures + CI | repeatable |
 | M3-A | Events | logical change envelope | DONE (prototype) | `LogicalChangeV1` + deterministic hash | versioned |
 | M3-B | Events | deterministic replay | PARTIAL (prototype) | startup journal replay | reproducible |
-| M3-C | Events | change feed/export/import | PLANNED | API | stable |
-| M4-A | Sync | push/pull/checkpoint/resume | PLANNED | sync v0 | convergent |
-| M4-B | Conflicts | conflict taxonomy | PLANNED | policy spec | explicit |
+| M3-C | Events | change feed/export/import | PARTIAL (prototype) | export + checkpoint delta selection | resumable |
+| M4-A | Sync | push/pull/checkpoint/resume | DONE (prototype) | sync v0 + two-replica fixture | convergent |
+| M4-B | Conflicts | conflict taxonomy | PARTIAL (prototype) | conservative classifier | explicit |
 | M4-C | CRDT | mergeable-structure prototypes | PLANNED | test suite | deterministic |
 | M5-A | Versioning | snapshots | PLANNED | API/storage mapping | restorable |
 | M5-B | Versioning | named branches | PLANNED | API | isolated |
@@ -79,38 +79,43 @@ LocalFirstStore
               |
               +-- ChangeEnvelope v0
               +-- LogicalChangeV1
+              +-- checkpoint delta selection
               +-- status records
               +-- duplicate suppression
               +-- startup replay
-              +-- ordered local subscriptions
+              +-- ordered subscriptions
+              +-- verified remote apply
+
+mwdb/sync
+      |
+      +-- SyncHello / SyncBatch / SyncAck
+      +-- hash verification
+      +-- idempotent batch apply
+      +-- persistent acknowledgement
+      +-- conflict classification
+      +-- two-replica convergence fixture
 ```
 
 The journal is written and synced before `set()` returns. Startup replays logical changes so a crash between journal and snapshot persistence can be recovered.
 
 ## Verification status
 
-The prototype has six unit tests covering:
+The current prototypes have focused tests covering offline writes, restart persistence, acknowledgement persistence, duplicate suppression, journal replay, ordered subscriptions, deterministic hashing, checkpoint deltas, verified remote apply, two-replica convergence, retry idempotency, and conservative conflict classification.
 
-- offline local write
-- restart persistence
-- acknowledgement persistence
-- duplicate change suppression
-- journal replay recovery
-- ordered local subscriptions / reconnect fixture
-- deterministic logical-change hashing and verification
-
-The repository now includes a dedicated GitHub Actions workflow for this prototype. The repository-level workflow run has not yet been observed through the available connector, so M2-D remains `IN PROGRESS` rather than being declared fully verified.
+Dedicated GitHub Actions workflows exist for the local-first and sync crates. CI should be treated as the verification source of truth; no production-readiness claim is made from unit tests alone.
 
 ## Next execution target
 
 ```text
-M2-D deterministic offline/reconnect harness
+M2-D  deterministic fault/recovery harness
           ↓
-M3-B replay + export/import + checkpoint
+M3-B/C  independent replay + import/resume
           ↓
-M4-A sync protocol v0
+M4-B/C  conflict policy + CRDT experiments
           ↓
-M4-B/M4-C conflict + CRDT
+M4 observability / transport adapter
+          ↓
+M7 authenticated federation
 ```
 
-Do not start blockchain, P2P, or a native storage rewrite before the local-first and logical-change contracts are stable.
+Do not start blockchain, public P2P, or a native storage rewrite before the local-first, logical-change, and sync contracts are stable and supported by benchmarks.
