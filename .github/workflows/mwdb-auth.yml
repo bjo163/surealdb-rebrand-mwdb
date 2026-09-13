@@ -1,0 +1,25 @@
+name: MW-DB Auth
+
+on:
+  push:
+    paths:
+      - 'mwdb/auth/**'
+      - 'docs/MWDB-M7-AUTH.md'
+      - '.github/workflows/mwdb-auth.yml'
+  pull_request:
+    paths:
+      - 'mwdb/auth/**'
+      - 'docs/MWDB-M7-AUTH.md'
+      - '.github/workflows/mwdb-auth.yml'
+
+jobs:
+  test-auth:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mwdb/auth
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo test
+      - run: cargo check
