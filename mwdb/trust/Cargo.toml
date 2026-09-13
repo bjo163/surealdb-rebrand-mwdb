@@ -1,0 +1,14 @@
+[workspace]
+
+[package]
+name = "mwdb-trust"
+version = "0.1.0"
+edition = "2024"
+publish = false
+license-file = "../../LICENSE"
+description = "MW-DB persistent peer trust store"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
