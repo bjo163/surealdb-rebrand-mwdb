@@ -50,6 +50,7 @@ jobs:
           - merkle
           - capabilities
           - trust
+          - replication
           - integration
     steps:
       - uses: actions/checkout@v4
