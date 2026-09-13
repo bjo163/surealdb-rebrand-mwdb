@@ -1,0 +1,16 @@
+[workspace]
+
+[package]
+name = "mwdb-integration"
+version = "0.1.0"
+edition = "2024"
+publish = false
+license-file = "../../LICENSE"
+
+[dependencies]
+mwdb-auth = { path = "../auth" }
+mwdb-canonical = { path = "../canonical" }
+mwdb-identity = { path = "../identity" }
+mwdb-merkle = { path = "../merkle" }
+mwdb-signing = { path = "../signing" }
+serde_json = "1"
