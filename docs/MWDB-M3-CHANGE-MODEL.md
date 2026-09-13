@@ -33,7 +33,10 @@ Implemented in `mwdb/local-first/src/lib.rs`.
 - logical JSONL export
 - export verification
 - checkpoint metadata
-- deterministic export/replay test fixture
+- checkpoint-based delta selection
+- durable verified remote application
+- standalone `mwdb/replay` import/export helpers
+- replay/import tests for reconstruction, idempotent re-import, and malformed input
 
 ## Design rules
 
@@ -43,19 +46,28 @@ Implemented in `mwdb/local-first/src/lib.rs`.
 - `logical_clock` provides an ordering signal without claiming global consensus.
 - `content_hash` is calculated from a deterministic canonical representation of the logical fields.
 - physical WAL records remain an engine concern and are not exposed as the sync format.
+- import must verify the complete logical change before mutating local state.
 
-## Important prototype limitation
+## Prototype limitations
 
 The current JSON representation is deterministic for the Rust prototype, but cross-language canonicalization is not frozen yet. A future protocol spec must define canonical serialization byte-for-byte before signatures or federation depend on it.
+
+The replay implementation currently supports the `set` operation used by the prototype. Unsupported logical operations are rejected rather than silently approximated.
+
+Persistent checkpoint storage and a network-facing change-feed API are still pending.
 
 ## Remaining M3 work
 
 1. formal versioned protocol specification;
 2. canonical cross-language encoding;
-3. replay engine for arbitrary supported operations, not only `set`;
-4. import validation and idempotent ingestion;
-5. persistent checkpoints/cursors;
-6. change-feed API.
+3. replay engine for arbitrary supported operations;
+4. persistent checkpoints/cursors;
+5. network-facing change-feed API;
+6. deterministic multi-implementation compatibility fixtures.
+
+## Verification
+
+`mwdb/local-first` covers durable journaling, startup replay, verified remote application, and checkpoint metadata. `mwdb/replay` validates JSONL export/import independently and ensures re-import is idempotent.
 
 ## Gate
 
