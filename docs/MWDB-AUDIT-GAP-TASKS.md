@@ -11,9 +11,12 @@ The recent MW-DB implementation work is executable prototype work, not documenta
 ## Release-track evidence added
 
 - `docs/MWDB-RELEASE-GATE.json` — machine-readable P0 release gate; current release status is intentionally `blocked`.
+- `docs/MWDB-PROVENANCE.md` — upstream identity, attribution, and release provenance policy.
 - `docs/canonical-vectors.json` — language-neutral canonicalization vectors and rules.
+- `tools/canonical_verify.mjs` — independent Node.js vector implementation.
+- `mwdb/integration/` — cross-crate integration harness covering canonicalization, public-key identity, signing, Merkle proof, authenticated replay protection, local write → sync → persistent cursor.
 - `mwdb/canonical/src/lib.rs` — canonical integral-number normalization plus vector tests.
-- CI fix commit `c73b53f51c81859399c26d08f1484a8abcd8be69` raises fuzz recursion limits for the structured executor targets; its push workflows must still complete successfully before release evidence is accepted.
+- CI fix commit `c73b53f51c81859399c26d08f1484a8abcd8be69` raises fuzz recursion limits for the structured executor targets; push workflows must complete successfully before release evidence is accepted.
 
 ## Completed implementation tasks
 
@@ -45,13 +48,13 @@ Limit: shared-key authentication only; public-key identity and key lifecycle are
 ### MW-T07 — Canonical encoding boundary
 Status: INTEGRATION TESTED (prototype)
 Target: mwdb/canonical
-Progress: integral-number normalization and language-neutral vectors added.
-Limit: independent non-Rust implementation and cross-language hash agreement remain open.
+Progress: integral-number normalization, language-neutral vectors, and independent Node vector verifier added.
+Limit: cross-language hash agreement and full numeric edge-case contract remain open.
 
 ### MW-T08 — Signed change prototype
 Status: DONE (prototype)
 Target: mwdb/signing
-Limit: integration with public identity and Merkle semantics remains open.
+Limit: production key lifecycle and full Merkle semantics remain open.
 
 ### MW-T09 — Merkle state root
 Status: DONE (prototype)
@@ -87,11 +90,15 @@ Close condition: independent implementation reproduces every vector and hash.
 
 ### GAP-02 — Independent canonical implementation
 Priority: P0
-Status: OPEN
+Status: INTEGRATION TESTED
+Evidence: `tools/canonical_verify.mjs`, `docs/canonical-vectors.json`
+Close condition: CI verifies every vector; hash agreement is a separate release evidence requirement.
 
 ### GAP-03 — Sync/cursor integration
 Priority: P0
-Status: OPEN
+Status: INTEGRATION TESTED
+Evidence: `mwdb/integration/src/lib.rs`
+Close condition: CI passes the two-replica local write → sync → persisted cursor fixture.
 
 ### GAP-04 — Observability integration
 Priority: P1
@@ -99,7 +106,9 @@ Status: OPEN
 
 ### GAP-05 — Public-key peer identity integration
 Priority: P0
-Status: OPEN
+Status: INTEGRATION TESTED
+Evidence: `mwdb/integration/src/lib.rs`
+Close condition: identity verification is enforced by the actual sync state machine, not only the harness.
 
 ### GAP-06 — Capability negotiation state machine
 Priority: P1
@@ -107,7 +116,9 @@ Status: OPEN
 
 ### GAP-07 — Persistent replay protection
 Priority: P0
-Status: OPEN
+Status: IN PROGRESS
+Evidence: replay-window state serialization exists; integration harness verifies duplicate rejection.
+Close condition: peer-scoped persistence and key lifecycle are enforced across restart and sync.
 
 ### GAP-08 — Key rotation / revocation
 Priority: P1
@@ -119,7 +130,9 @@ Status: OPEN
 
 ### GAP-10 — Signed-change + Merkle integration
 Priority: P0
-Status: OPEN
+Status: INTEGRATION TESTED
+Evidence: `mwdb/integration/src/lib.rs`
+Close condition: signed logical changes become the authoritative Merkle leaves/state contribution in the production path.
 
 ### GAP-11 — Network transport adapter
 Priority: P1
@@ -139,7 +152,9 @@ Status: OPEN
 
 ### GAP-15 — M0 provenance baseline
 Priority: P0
-Status: OPEN
+Status: INTEGRATION TESTED
+Evidence: `docs/MWDB-PROVENANCE.md`
+Close condition: release artifact records exact upstream baseline and compatibility delta.
 
 ### GAP-16 — Compatibility matrix
 Priority: P1
