@@ -61,10 +61,10 @@ Scope: persisted pending/sent/acknowledged/rejected/conflicted states with stabl
 Acceptance: crash/restart does not lose acknowledged local changes or duplicate them.
 
 ### MW-022 — Offline/online test harness
-Status: PARTIAL
-Scope: deterministic network-off, reconnect, retry, and crash simulation.
-Acceptance: CI can execute representative offline scenarios deterministically.
-Current: restart/replay/reconnect fixtures and transport-neutral drop/duplicate/reorder modeling exist; real network transport fault injection remains.
+Status: DONE (prototype)
+Scope: deterministic network-off, reconnect, retry, crash simulation, and transport fault modeling.
+Acceptance: CI can execute representative offline/recovery scenarios deterministically.
+Current: restart/replay/reconnect fixtures, drop/duplicate/reorder modeling, and retry/eventual-convergence coverage exist; real socket-level network injection remains future work.
 
 ### MW-023 — Subscription semantics
 Status: DONE (prototype)
@@ -89,7 +89,13 @@ Current: startup replay exists and `mwdb/replay` provides verified JSONL reconst
 Status: PARTIAL
 Scope: inspect/export/import logical changes and checkpoints.
 Acceptance: a consumer can resume from a checkpoint without replaying already acknowledged changes.
-Current: logical JSONL export, validation, checkpoint metadata, checkpoint delta selection, and standalone import/idempotent re-import exist; persistent cursor/network feed remain.
+Current: logical JSONL export, validation, checkpoint metadata, checkpoint delta selection, standalone import/idempotent re-import, and persistent peer cursors exist; a network-facing feed remains.
+
+### MW-033 — Persistent peer cursor
+Status: DONE (prototype)
+Scope: durable per-peer last-change and logical-clock checkpoints.
+Acceptance: peer cursor survives restart, rejects malformed state, and supports idempotent removal.
+Current: `mwdb/cursor` stores deterministic JSON checkpoints with atomic temp-file replacement.
 
 ## M4 — Sync / conflicts
 
@@ -112,9 +118,15 @@ Acceptance: merges are deterministic and tests prove no silent data loss.
 Current: state-based G-Counter prototype with deterministic max merge and algebraic property tests exists. Additional domain-specific CRDTs and production integration remain.
 
 ### MW-043 — Sync observability
+Status: DONE (prototype)
+Scope: sync latency/state signals, queue depth, retries, conflicts, bytes transferred, and change outcomes.
+Acceptance: semantic events map deterministically to measurable counters.
+Current: `mwdb/observability` provides typed events, counter snapshots, serialization, and snapshot merge. Emission from the sync engine and backend adapters remain future work.
+
+### MW-044 — Authenticated transport adapter
 Status: PLANNED
-Scope: sync latency, queue depth, retries, conflicts, bytes transferred, convergence time.
-Acceptance: metrics exist for every sync state transition.
+Scope: bind sync protocol to authenticated peer identity/capability negotiation without hard-coding a transport.
+Acceptance: unauthenticated or unsupported peers cannot mutate replicated state.
 
 ## M5 — Branching / time travel
 
@@ -251,6 +263,6 @@ Acceptance: decision cites benchmark and legal/operational constraints.
 
 ## Current execution priority
 
-`M2-022 -> M3-031/032 -> M4-043 -> M7-073`
+`M3-031/032 -> M6-060 -> M4-044 -> M7-073`
 
-M2 local-first, M3 logical-change/replay, and M4 sync/conflict prototypes are the active foundation. Do not claim production sync or federation until authenticated transport, persistent cursors, canonical cross-language encoding, and partition testing are complete.
+The local-first, logical-change, and sync prototypes are now a usable foundation. The remaining production gate is cross-language canonicalization plus authenticated transport and partition testing. Do not claim production federation until those gates pass.
