@@ -1,0 +1,32 @@
+name: MW-DB Replay Prototype
+
+on:
+  push:
+    paths:
+      - "mwdb/local-first/**"
+      - "mwdb/replay/**"
+      - "docs/MWDB-M3-CHANGE-MODEL.md"
+      - ".github/workflows/mwdb-replay.yml"
+  pull_request:
+    paths:
+      - "mwdb/local-first/**"
+      - "mwdb/replay/**"
+      - "docs/MWDB-M3-CHANGE-MODEL.md"
+      - ".github/workflows/mwdb-replay.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mwdb/replay
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Test
+        run: cargo test
+      - name: Check
+        run: cargo check
