@@ -1,10 +1,15 @@
 #[cfg(test)]
 mod tests {
+    use std::collections::HashSet;
+
     use mwdb_auth::{ReplayWindow, SharedKeyAuthenticator};
     use mwdb_canonical::canonicalize;
+    use mwdb_cursor::{CursorStore, PeerCursor};
     use mwdb_identity::{verify_signed_bytes, IdentityKey};
+    use mwdb_local_first::LocalFirstStore;
     use mwdb_merkle::{build_proof, hash_leaf, state_root, verify_proof};
     use mwdb_signing::{sign, verify};
+    use mwdb_sync::{apply_batch, make_ack, select_since};
 
     #[test]
     fn canonical_identity_signature_merkle_auth_replay_pipeline() {
@@ -60,5 +65,47 @@ mod tests {
         let mut proof = build_proof(&leaves, 0).unwrap();
         proof.leaf[0] ^= 1;
         assert!(!verify_proof(root, &proof).unwrap());
+    }
+
+    #[test]
+    fn local_write_syncs_and_persists_peer_cursor() {
+        let base = std::env::temp_dir().join(format!("mwdb-integration-{}", uuid::Uuid::new_v4()));
+        let a_dir = base.join("a");
+        let b_dir = base.join("b");
+        let cursor_path = base.join("peers.json");
+        std::fs::create_dir_all(&base).unwrap();
+
+        let mut a = LocalFirstStore::open(&a_dir, "node-a").unwrap();
+        let mut b = LocalFirstStore::open(&b_dir, "node-b").unwrap();
+        let mut seen_b = HashSet::new();
+
+        let change_id = a.set("doc:1", serde_json::json!({"value": 42})).unwrap();
+        let batch = select_since(a.queue(), None).unwrap();
+        assert_eq!(batch.changes.len(), 1);
+        assert_eq!(batch.changes[0].change_id, change_id);
+
+        let ack = {
+            let ids = batch.changes.iter().map(|change| change.change_id).collect();
+            make_ack(ids, Vec::new())
+        };
+        apply_batch(&mut b, &mut seen_b, &batch).unwrap();
+        assert_eq!(b.get("doc:1"), Some(&serde_json::json!({"value": 42})));
+
+        let checkpoint = a.queue().logical_changes().last().unwrap();
+        let mut cursors = CursorStore::open(&cursor_path).unwrap();
+        cursors
+            .upsert(PeerCursor {
+                peer_id: "node-b".into(),
+                last_change_id: ack.checkpoint,
+                last_clock: checkpoint.logical_clock,
+            })
+            .unwrap();
+
+        let reopened = CursorStore::open(&cursor_path).unwrap();
+        let saved = reopened.get("node-b").unwrap();
+        assert_eq!(saved.last_change_id, Some(change_id));
+        assert_eq!(saved.last_clock, checkpoint.logical_clock);
+
+        let _ = std::fs::remove_dir_all(base);
     }
 }
