@@ -50,6 +50,7 @@ jobs:
           - merkle
           - capabilities
           - trust
+          - integration
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
