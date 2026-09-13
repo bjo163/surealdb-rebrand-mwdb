@@ -1,3 +1,5 @@
+use std::collections::BTreeSet;
+
 use blake3::Hasher;
 use thiserror::Error;
 
@@ -11,6 +13,10 @@ pub enum AuthError {
     InvalidTag,
     #[error("empty node id")]
     EmptyNodeId,
+    #[error("replayed nonce")]
+    Replay,
+    #[error("nonce is outside replay window")]
+    StaleNonce,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -28,28 +34,25 @@ pub struct SharedKeyAuthenticator {
 }
 
 impl SharedKeyAuthenticator {
-    pub fn new(key: [u8; 32]) -> Self {
-        Self { key }
-    }
+    pub fn new(key: [u8; 32]) -> Self { Self { key } }
 
     pub fn seal(&self, node_id: impl Into<String>, nonce: u64, issued_at_ms: u128, payload: Vec<u8>) -> Result<AuthenticatedFrame, AuthError> {
         let node_id = node_id.into();
-        if node_id.is_empty() {
-            return Err(AuthError::EmptyNodeId);
-        }
+        if node_id.is_empty() { return Err(AuthError::EmptyNodeId); }
         let tag = self.tag(AUTH_FRAME_V1, &node_id, nonce, issued_at_ms, &payload);
         Ok(AuthenticatedFrame { version: AUTH_FRAME_V1, node_id, nonce, issued_at_ms, payload, tag })
     }
 
     pub fn verify(&self, frame: &AuthenticatedFrame) -> Result<(), AuthError> {
-        if frame.version != AUTH_FRAME_V1 {
-            return Err(AuthError::InvalidVersion);
-        }
+        if frame.version != AUTH_FRAME_V1 { return Err(AuthError::InvalidVersion); }
         let expected = self.tag(frame.version, &frame.node_id, frame.nonce, frame.issued_at_ms, &frame.payload);
-        if expected != frame.tag {
-            return Err(AuthError::InvalidTag);
-        }
+        if expected != frame.tag { return Err(AuthError::InvalidTag); }
         Ok(())
+    }
+
+    pub fn verify_and_accept(&self, window: &mut ReplayWindow, frame: &AuthenticatedFrame) -> Result<(), AuthError> {
+        self.verify(frame)?;
+        window.accept(frame.nonce)
     }
 
     fn tag(&self, version: u16, node_id: &str, nonce: u64, issued_at_ms: u128, payload: &[u8]) -> [u8; 32] {
@@ -63,6 +66,43 @@ impl SharedKeyAuthenticator {
         hasher.update(&(payload.len() as u64).to_be_bytes());
         hasher.update(payload);
         *hasher.finalize().as_bytes()
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct ReplayWindow {
+    width: u64,
+    highest: Option<u64>,
+    seen: BTreeSet<u64>,
+}
+
+impl ReplayWindow {
+    pub fn new(width: u64) -> Self {
+        assert!(width > 0, "replay window must be non-zero");
+        Self { width, highest: None, seen: BTreeSet::new() }
+    }
+
+    /// Accept a nonce exactly once while it is inside the configured window.
+    pub fn accept(&mut self, nonce: u64) -> Result<(), AuthError> {
+        if self.seen.contains(&nonce) { return Err(AuthError::Replay); }
+        if let Some(highest) = self.highest {
+            let floor = highest.saturating_sub(self.width.saturating_sub(1));
+            if nonce < floor { return Err(AuthError::StaleNonce); }
+            if nonce > highest { self.highest = Some(nonce); }
+        } else {
+            self.highest = Some(nonce);
+        }
+        self.seen.insert(nonce);
+        self.prune();
+        Ok(())
+    }
+
+    pub fn highest(&self) -> Option<u64> { self.highest }
+
+    fn prune(&mut self) {
+        let Some(highest) = self.highest else { return; };
+        let floor = highest.saturating_sub(self.width.saturating_sub(1));
+        self.seen.retain(|nonce| *nonce >= floor);
     }
 }
 
@@ -98,5 +138,24 @@ mod tests {
     #[test]
     fn empty_node_is_rejected() {
         assert_eq!(auth().seal("", 1, 42, vec![]).unwrap_err(), AuthError::EmptyNodeId);
+    }
+
+    #[test]
+    fn replay_window_rejects_duplicate_and_stale_nonces() {
+        let mut window = ReplayWindow::new(4);
+        assert!(window.accept(10).is_ok());
+        assert_eq!(window.accept(10), Err(AuthError::Replay));
+        assert!(window.accept(8).is_ok());
+        assert_eq!(window.accept(6), Err(AuthError::StaleNonce));
+        assert!(window.accept(14).is_ok());
+        assert_eq!(window.highest(), Some(14));
+    }
+
+    #[test]
+    fn authenticated_accept_combines_tag_and_replay_checks() {
+        let mut window = ReplayWindow::new(8);
+        let frame = auth().seal("node-a", 9, 42, b"hello".to_vec()).unwrap();
+        assert!(auth().verify_and_accept(&mut window, &frame).is_ok());
+        assert_eq!(auth().verify_and_accept(&mut window, &frame), Err(AuthError::Replay));
     }
 }
