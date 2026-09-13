@@ -16,12 +16,7 @@ use uuid::Uuid;
 
 pub const REPLICATION_PROTOCOL_V1: u16 = 1;
 const REPLAY_WINDOW: u64 = 64;
-pub const CAPABILITIES_V1: &[&str] = &[
-    "sync.v1",
-    "identity.ed25519.v1",
-    "auth.frame.v1",
-    "proof.merkle.v1",
-];
+pub const CAPABILITIES_V1: &[&str] = &["sync.v1", "identity.ed25519.v1", "auth.frame.v1", "proof.merkle.v1"];
 
 #[derive(Debug, Error)]
 pub enum ReplicationError {
@@ -92,8 +87,8 @@ fn load_state(path: &Path) -> Result<DurableSessionState, ReplicationError> {
 
 fn now_ms() -> u128 { SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis() }
 
-fn capability_hello(node_id: &str) -> CapabilityHello {
-    CapabilityHello { protocol: mwdb_capabilities::CAPABILITY_PROTOCOL_V1, node_id: node_id.to_string(), capabilities: CAPABILITIES_V1.iter().map(|value| (*value).to_string()).collect() }
+fn capability_hello(peer_id: &str) -> CapabilityHello {
+    CapabilityHello { protocol: mwdb_capabilities::CAPABILITY_PROTOCOL_V1, node_id: peer_id.to_string(), capabilities: CAPABILITIES_V1.iter().map(|value| (*value).to_string()).collect() }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -156,7 +151,7 @@ impl ReplicationSession {
         wire.capabilities = CAPABILITIES_V1.iter().map(|value| (*value).to_string()).collect();
         let bytes = serde_json::to_vec(&wire)?;
         let nonce = self.state.next_nonce;
-        let frame = self.auth.seal(&self.node_id, nonce, now_ms(), bytes)?;
+        let frame = self.auth.seal(self.identity.identity().peer_id.clone(), nonce, now_ms(), bytes)?;
         self.state.next_nonce = nonce.saturating_add(1);
         persist_state(&self.state_path, &self.state)?;
         self.metrics.observe(&SyncEvent::BatchSent { changes: batch.changes.len(), bytes: frame.payload.len() });
@@ -173,7 +168,7 @@ impl ReplicationSession {
         if !self.trust.is_trusted(&peer.peer_id, &peer.public_key) { return Err(ReplicationError::UntrustedPeer(peer.peer_id)); }
 
         let remote_hello = CapabilityHello { protocol: mwdb_capabilities::CAPABILITY_PROTOCOL_V1, node_id: peer.peer_id.clone(), capabilities: wire.capabilities };
-        let agreement = negotiate(&capability_hello(&self.node_id), &remote_hello)?;
+        let agreement = negotiate(&capability_hello(self.identity.identity().peer_id.as_str()), &remote_hello)?;
         require(&agreement, "sync.v1")?;
         require(&agreement, "identity.ed25519.v1")?;
         require(&agreement, "auth.frame.v1")?;
@@ -226,7 +221,7 @@ mod tests {
 
     #[test]
     fn authenticated_replication_wires_capability_identity_auth_replay_cursor_merkle_and_observability() {
-        let (_a_dir, _b_dir, mut a, mut b) = sessions(1, 2);
+        let (_a_dir, b_dir, mut a, mut b) = sessions(1, 2);
         b.trust_peer(a.identity(), Some("test-peer".into())).unwrap();
         a.store_mut().set("doc:1", serde_json::json!({"v": 42})).unwrap();
         let frame = a.make_frame(None).unwrap();
@@ -239,8 +234,7 @@ mod tests {
         assert_eq!(first.metrics.batches_received, 1);
         assert!(matches!(b.receive_frame(&frame), Err(ReplicationError::Auth(mwdb_auth::AuthError::Replay))));
         drop(b);
-
-        let mut b = ReplicationSession::open(_b_dir.path(), "node-b", [2; 32], [9; 32]).unwrap();
+        let mut b = ReplicationSession::open(b_dir.path(), "node-b", [2; 32], [9; 32]).unwrap();
         b.trust_peer(a.identity(), None).unwrap();
         let frame2 = a.make_frame(None).unwrap();
         let second = b.receive_frame(&frame2).unwrap();
