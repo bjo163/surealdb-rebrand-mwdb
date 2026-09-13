@@ -3,6 +3,16 @@ import fs from 'node:fs';
 const vectorPath = new URL('../docs/canonical-vectors.json', import.meta.url);
 const document = JSON.parse(fs.readFileSync(vectorPath, 'utf8'));
 
+function compareCodePoints(a, b) {
+  const left = Array.from(a, (char) => char.codePointAt(0));
+  const right = Array.from(b, (char) => char.codePointAt(0));
+  const length = Math.min(left.length, right.length);
+  for (let i = 0; i < length; i += 1) {
+    if (left[i] !== right[i]) return left[i] - right[i];
+  }
+  return left.length - right.length;
+}
+
 function canonicalize(value) {
   if (value === null) return 'null';
   if (typeof value === 'boolean') return value ? 'true' : 'false';
@@ -22,7 +32,7 @@ function canonicalize(value) {
   }
 
   if (typeof value === 'object') {
-    const keys = Object.keys(value).sort();
+    const keys = Object.keys(value).sort(compareCodePoints);
     return `{${keys.map((key) => `${JSON.stringify(key)}:${canonicalize(value[key])}`).join(',')}}`;
   }
 
