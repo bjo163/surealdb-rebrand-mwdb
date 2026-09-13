@@ -1,6 +1,7 @@
 use std::collections::BTreeSet;
 
 use blake3::Hasher;
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 pub const AUTH_FRAME_V1: u16 = 1;
@@ -69,6 +70,13 @@ impl SharedKeyAuthenticator {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ReplayWindowState {
+    pub width: u64,
+    pub highest: Option<u64>,
+    pub seen: BTreeSet<u64>,
+}
+
 #[derive(Debug, Clone)]
 pub struct ReplayWindow {
     width: u64,
@@ -80,6 +88,17 @@ impl ReplayWindow {
     pub fn new(width: u64) -> Self {
         assert!(width > 0, "replay window must be non-zero");
         Self { width, highest: None, seen: BTreeSet::new() }
+    }
+
+    pub fn from_state(state: ReplayWindowState) -> Self {
+        assert!(state.width > 0, "replay window must be non-zero");
+        let mut window = Self { width: state.width, highest: state.highest, seen: state.seen };
+        window.prune();
+        window
+    }
+
+    pub fn state(&self) -> ReplayWindowState {
+        ReplayWindowState { width: self.width, highest: self.highest, seen: self.seen.clone() }
     }
 
     /// Accept a nonce exactly once while it is inside the configured window.
@@ -149,6 +168,16 @@ mod tests {
         assert_eq!(window.accept(6), Err(AuthError::StaleNonce));
         assert!(window.accept(14).is_ok());
         assert_eq!(window.highest(), Some(14));
+    }
+
+    #[test]
+    fn replay_window_state_round_trip() {
+        let mut window = ReplayWindow::new(8);
+        window.accept(9).unwrap();
+        window.accept(10).unwrap();
+        let restored = ReplayWindow::from_state(window.state());
+        assert_eq!(restored.highest(), Some(10));
+        assert_eq!(restored.seen.contains(&9), true);
     }
 
     #[test]
