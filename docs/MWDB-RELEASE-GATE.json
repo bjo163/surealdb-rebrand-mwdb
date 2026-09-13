@@ -15,9 +15,9 @@
     {"id":"P0-03","name":"Independent canonical implementation","status":"in_progress","gap":"GAP-02","evidence":"tools/canonical_verify.mjs"},
     {"id":"P0-04","name":"Sync and persistent cursor integration","status":"in_progress","gap":"GAP-03","evidence":"mwdb/integration/src/lib.rs; mwdb/cursor/src/lib.rs"},
     {"id":"P0-05","name":"Public-key identity enforcement","status":"in_progress","gap":"GAP-05","evidence":"mwdb/integration/src/lib.rs"},
-    {"id":"P0-06","name":"Persistent replay protection and key lifecycle","status":"in_progress","gap":"GAP-07","evidence":"mwdb/auth/src/lib.rs; mwdb/integration/src/lib.rs"},
+    {"id":"P0-06","name":"Persistent replay protection and key lifecycle","status":"in_progress","gap":"GAP-07","evidence":"mwdb/auth/src/lib.rs; mwdb/integration/src/lib.rs; mwdb/integration/tests/partition_federation.rs"},
     {"id":"P0-07","name":"Signed change to Merkle state/proof integration","status":"in_progress","gap":"GAP-10","evidence":"mwdb/integration/src/lib.rs; mwdb/merkle/src/proofs.rs"},
-    {"id":"P0-08","name":"Partition and federation suite","status":"open","gap":"GAP-12"}
+    {"id":"P0-08","name":"Partition and federation suite","status":"in_progress","gap":"GAP-12","evidence":"mwdb/integration/tests/partition_federation.rs; docs/MWDB-P0-08-PARTITION-FEDERATION.md"}
   ],
   "non_blocking_next": [
     "GAP-04",
