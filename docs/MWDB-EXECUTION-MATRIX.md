@@ -7,8 +7,8 @@ This is the working dashboard for determining **where the project is now** and *
 - Repository: `bjo163/surealdb-rebrand-mwdb`
 - Branch: `main`
 - Substrate: existing SurrealDB Rust workspace
-- MW-DB feature substrate: `mwdb/local-first` + `mwdb/sync` + `mwdb/replay` + `mwdb/cursor` + `mwdb/observability`
-- Current posture: upstream-derived research/product fork with local-first durability, logical changes, checkpoint sync, conflict classification, CRDT prototype, persistent peer cursors, and transport-neutral sync metrics.
+- MW-DB feature substrate: `mwdb/local-first` + `mwdb/sync` + `mwdb/replay` + `mwdb/cursor` + `mwdb/observability` + `mwdb/auth`
+- Current posture: upstream-derived research/product fork with local-first durability, logical changes, checkpoint sync, conflict classification, CRDT prototype, persistent peer cursors, sync metrics, and shared-key authenticated transport prototype.
 - GitHub Issues: disabled; executable backlog remains in `docs/MWDB-ISSUE-PLAN.md`.
 
 ## Overall status
@@ -20,7 +20,7 @@ M2  Local-first                IN PROGRESS
 M3  Logical changes            IN PROGRESS
 M4  Sync / conflicts            IN PROGRESS ← current feature gate
 M5  Branch / time travel       PLANNED
-M6  Verification                PLANNED
+M6  Verification                IN PROGRESS
 M7  Federation / distribution   PLANNED
 M8  Adaptive trust              PLANNED
 M9  Agent-native                PLANNED
@@ -45,23 +45,24 @@ M10 Native-engine decision      GATE
 | M3-B | Events | deterministic replay | PARTIAL (prototype) | startup journal replay + standalone replay crate | reproducible |
 | M3-C | Events | change feed/export/import | PARTIAL (prototype) | export + checkpoint delta selection + JSONL import | resumable |
 | M3-D | Events | persistent peer cursor | DONE (prototype) | `mwdb/cursor` durable peer checkpoints | restart-safe |
+| M3-E | Events | canonical cross-language encoding | PARTIAL (prototype) | canonical encoding boundary + interoperability gate | cross-implementation |
 | M4-A | Sync | push/pull/checkpoint/resume | DONE (prototype) | sync v0 + two-replica fixture | convergent |
 | M4-B | Conflicts | conflict taxonomy | DONE (prototype) | conservative classifier + policy | explicit |
 | M4-C | CRDT | mergeable-structure prototypes | DONE (prototype) | deterministic G-Counter + algebraic tests | deterministic |
 | M4-D | Resilience | drop/duplicate/reorder fault harness | DONE (prototype) | transport-neutral fault model | repeatable |
 | M4-E | Observability | sync state metrics | DONE (prototype) | `mwdb/observability` event/counter contract | measurable |
-| M4-F | Transport | authenticated peer transport | PLANNED | adapter contract | authenticated |
+| M4-F | Transport | authenticated shared-key transport | DONE (prototype) | `mwdb/auth` authenticated frame adapter | integrity |
 | M5-A | Versioning | snapshots | PLANNED | API/storage mapping | restorable |
 | M5-B | Versioning | named branches | PLANNED | API | isolated |
 | M5-C | Versioning | diff | PLANNED | change/state diff | accurate |
 | M5-D | Versioning | merge/reject/rollback | PLANNED | workflow | safe |
 | M6-A | Proof | hashes/content identity | BASELINE (prototype) | BLAKE3 content hash | deterministic |
-| M6-B | Proof | Merkle state | PLANNED | root/proof | verifiable |
+| M6-B | Proof | Merkle state root | PLANNED | root/proof | verifiable |
 | M6-C | Proof | signed changes | PLANNED | signature envelope | authentic |
 | M6-D | Proof | inclusion/state proofs | PLANNED | verifier | independent |
-| M7-A | Network | peer identity | PLANNED | protocol | authenticated |
+| M7-A | Network | peer identity and capabilities | PLANNED | protocol | authenticated |
 | M7-B | Network | replication topology | PLANNED | topology model | tested |
-| M7-C | Network | peer sync | PLANNED | transport integration | resilient |
+| M7-C | Network | peer sync | PARTIAL (prototype) | authenticated frame boundary | resilient |
 | M7-D | Network | failure/partition tests | PLANNED | chaos/fault suite | passes |
 | M8-A | Trust | consistency policy model | PLANNED | schema/data policy | explicit |
 | M8-B | Trust | adaptive enforcement | PLANNED | planner/runtime hooks | correct |
@@ -78,7 +79,6 @@ M10 Native-engine decision      GATE
 LocalFirstStore
       |
       +-- state.json (rebuildable snapshot)
-      |
       +-- changes.log (durable logical journal)
               |
               +-- ChangeEnvelope v0
@@ -119,22 +119,28 @@ mwdb/observability
       +-- semantic sync events
       +-- deterministic counters
       +-- mergeable metric snapshots
+
+mwdb/auth
+      |
+      +-- protocol-versioned authenticated frame
+      +-- keyed BLAKE3 integrity tag
+      +-- tamper detection tests
 ```
 
 ## Verification status
 
-Focused tests cover offline writes, restart persistence, acknowledgement persistence, duplicate suppression, journal replay, ordered subscriptions, deterministic hashing, checkpoint deltas, verified remote apply, two-replica convergence, retry idempotency, conflict classification, G-Counter algebraic properties, JSONL replay/import failure cases, persistent peer cursors, and sync metric accumulation/merge.
+Focused tests cover offline writes, restart persistence, acknowledgement persistence, duplicate suppression, journal replay, ordered subscriptions, deterministic hashing, checkpoint deltas, verified remote apply, two-replica convergence, retry idempotency, conflict classification, G-Counter algebraic properties, JSONL replay/import failure cases, persistent peer cursors, sync metric accumulation/merge, and authenticated-frame tamper detection.
 
-Dedicated GitHub Actions workflows exist for local-first, sync, replay, and observability prototypes. CI remains the verification source of truth; no production-readiness claim is made from unit tests alone.
+Dedicated GitHub Actions workflows exist for local-first, sync, replay, observability, and auth prototypes. CI remains the verification source of truth; no production-readiness claim is made from unit tests alone.
 
 ## Next execution target
 
 ```text
-M3 canonical cross-language encoding
+M3 canonical encoding test vectors / cross-implementation freeze
           ↓
-M4 cursor integration + authenticated transport adapter
+M4 sync + cursor + observability integration
           ↓
-M4 observability integration into sync operations
+M6 signed changes / Merkle verification
           ↓
 M7 federation / partition suite
           ↓
