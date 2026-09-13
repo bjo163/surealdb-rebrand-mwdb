@@ -1,0 +1,33 @@
+name: MW-DB Identity
+
+on:
+  push:
+    paths:
+      - "mwdb/identity/**"
+      - "mwdb/auth/**"
+      - ".github/workflows/mwdb-identity.yml"
+  pull_request:
+    paths:
+      - "mwdb/identity/**"
+      - "mwdb/auth/**"
+      - ".github/workflows/mwdb-identity.yml"
+
+jobs:
+  identity:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mwdb/identity
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo test --all-targets
+  auth:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mwdb/auth
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo test --all-targets
