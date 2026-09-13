@@ -9,12 +9,14 @@ description = "MW-DB authenticated replication session orchestration"
 [dependencies]
 mwdb-auth = { path = "../auth" }
 mwdb-canonical = { path = "../canonical" }
+mwdb-capabilities = { path = "../capabilities" }
 mwdb-cursor = { path = "../cursor" }
 mwdb-identity = { path = "../identity" }
 mwdb-local-first = { path = "../local-first" }
 mwdb-merkle = { path = "../merkle" }
 mwdb-observability = { path = "../observability" }
 mwdb-sync = { path = "../sync" }
+mwdb-trust = { path = "../trust" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
