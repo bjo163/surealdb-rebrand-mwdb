@@ -1,3 +1,5 @@
+[workspace]
+
 [package]
 name = "mwdb-identity"
 version = "0.1.0"

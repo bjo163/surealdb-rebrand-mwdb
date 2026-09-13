@@ -155,7 +155,11 @@ impl ChangeQueue {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        let reader = OpenOptions::new().create(true).read(true).open(&path)?;
+        let reader = OpenOptions::new()
+            .create(true)
+            .read(true)
+            .write(true)
+            .open(&path)?;
         let mut changes = Vec::new();
         let mut logical = Vec::new();
         let mut status = HashMap::new();

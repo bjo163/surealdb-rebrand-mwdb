@@ -100,6 +100,9 @@ mod tests {
     fn mismatched_peer_id_is_rejected() {
         let dir = tempdir().unwrap();
         let mut s = TrustStore::open(dir.path().join("trust.json")).unwrap();
-        assert_eq!(s.trust("ed25519-bad", [7; 32], None), Err(TrustError::PeerIdMismatch));
+        assert!(matches!(
+            s.trust("ed25519-bad", [7; 32], None),
+            Err(TrustError::PeerIdMismatch)
+        ));
     }
 }
