@@ -1,0 +1,12 @@
+[workspace]
+
+[package]
+name = "mwdb-auth"
+version = "0.1.0"
+edition = "2024"
+publish = false
+license-file = "../../LICENSE"
+
+[dependencies]
+blake3 = "1"
+thiserror = "2"
