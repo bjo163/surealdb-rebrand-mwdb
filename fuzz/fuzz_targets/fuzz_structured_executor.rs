@@ -1,4 +1,5 @@
 #![no_main]
+#![recursion_limit = "256"]
 
 use libfuzzer_sys::fuzz_target;
 use std::hint::black_box;
