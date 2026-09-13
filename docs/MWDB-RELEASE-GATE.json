@@ -3,14 +3,20 @@
   "release": "0.1.0-rc",
   "status": "blocked",
   "policy": "No production-ready claim until every P0 gate is green with reproducible CI evidence.",
+  "evidence_paths": [
+    "docs/MWDB-PROVENANCE.md",
+    "docs/canonical-vectors.json",
+    "tools/canonical_verify.mjs",
+    "mwdb/integration/"
+  ],
   "gates": [
-    {"id":"P0-01","name":"Provenance baseline","status":"open","gap":"GAP-15"},
-    {"id":"P0-02","name":"Canonical numeric normalization","status":"in_progress","gap":"GAP-01","evidence":"docs/canonical-vectors.json"},
-    {"id":"P0-03","name":"Independent canonical implementation","status":"open","gap":"GAP-02"},
+    {"id":"P0-01","name":"Provenance baseline","status":"in_progress","gap":"GAP-15","evidence":"docs/MWDB-PROVENANCE.md"},
+    {"id":"P0-02","name":"Canonical numeric normalization","status":"in_progress","gap":"GAP-01","evidence":"docs/canonical-vectors.json; mwdb/canonical/src/lib.rs"},
+    {"id":"P0-03","name":"Independent canonical implementation","status":"in_progress","gap":"GAP-02","evidence":"tools/canonical_verify.mjs"},
     {"id":"P0-04","name":"Sync and persistent cursor integration","status":"open","gap":"GAP-03"},
-    {"id":"P0-05","name":"Public-key identity enforcement","status":"open","gap":"GAP-05"},
+    {"id":"P0-05","name":"Public-key identity enforcement","status":"in_progress","gap":"GAP-05","evidence":"mwdb/integration/src/lib.rs"},
     {"id":"P0-06","name":"Persistent replay protection and key lifecycle","status":"open","gap":"GAP-07"},
-    {"id":"P0-07","name":"Signed change to Merkle state/proof integration","status":"open","gap":"GAP-10"},
+    {"id":"P0-07","name":"Signed change to Merkle state/proof integration","status":"in_progress","gap":"GAP-10","evidence":"mwdb/integration/src/lib.rs"},
     {"id":"P0-08","name":"Partition and federation suite","status":"open","gap":"GAP-12"}
   ],
   "non_blocking_next": [
