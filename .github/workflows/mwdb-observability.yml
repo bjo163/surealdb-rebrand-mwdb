@@ -1,0 +1,23 @@
+name: mwdb-observability
+
+on:
+  push:
+    paths:
+      - 'mwdb/observability/**'
+      - '.github/workflows/mwdb-observability.yml'
+  pull_request:
+    paths:
+      - 'mwdb/observability/**'
+      - '.github/workflows/mwdb-observability.yml'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mwdb/observability
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo test
+      - run: cargo check
