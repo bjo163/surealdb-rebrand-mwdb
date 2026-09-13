@@ -1,0 +1,102 @@
+use blake3::Hasher;
+use thiserror::Error;
+
+pub const AUTH_FRAME_V1: u16 = 1;
+
+#[derive(Debug, Error, PartialEq, Eq)]
+pub enum AuthError {
+    #[error("invalid frame version")]
+    InvalidVersion,
+    #[error("authentication tag mismatch")]
+    InvalidTag,
+    #[error("empty node id")]
+    EmptyNodeId,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AuthenticatedFrame {
+    pub version: u16,
+    pub node_id: String,
+    pub nonce: u64,
+    pub issued_at_ms: u128,
+    pub payload: Vec<u8>,
+    pub tag: [u8; 32],
+}
+
+pub struct SharedKeyAuthenticator {
+    key: [u8; 32],
+}
+
+impl SharedKeyAuthenticator {
+    pub fn new(key: [u8; 32]) -> Self {
+        Self { key }
+    }
+
+    pub fn seal(&self, node_id: impl Into<String>, nonce: u64, issued_at_ms: u128, payload: Vec<u8>) -> Result<AuthenticatedFrame, AuthError> {
+        let node_id = node_id.into();
+        if node_id.is_empty() {
+            return Err(AuthError::EmptyNodeId);
+        }
+        let tag = self.tag(AUTH_FRAME_V1, &node_id, nonce, issued_at_ms, &payload);
+        Ok(AuthenticatedFrame { version: AUTH_FRAME_V1, node_id, nonce, issued_at_ms, payload, tag })
+    }
+
+    pub fn verify(&self, frame: &AuthenticatedFrame) -> Result<(), AuthError> {
+        if frame.version != AUTH_FRAME_V1 {
+            return Err(AuthError::InvalidVersion);
+        }
+        let expected = self.tag(frame.version, &frame.node_id, frame.nonce, frame.issued_at_ms, &frame.payload);
+        if expected != frame.tag {
+            return Err(AuthError::InvalidTag);
+        }
+        Ok(())
+    }
+
+    fn tag(&self, version: u16, node_id: &str, nonce: u64, issued_at_ms: u128, payload: &[u8]) -> [u8; 32] {
+        let mut hasher = Hasher::new_keyed(&self.key);
+        hasher.update(b"mwdb-auth-frame-v1\0");
+        hasher.update(&version.to_be_bytes());
+        hasher.update(&(node_id.len() as u64).to_be_bytes());
+        hasher.update(node_id.as_bytes());
+        hasher.update(&nonce.to_be_bytes());
+        hasher.update(&issued_at_ms.to_be_bytes());
+        hasher.update(&(payload.len() as u64).to_be_bytes());
+        hasher.update(payload);
+        *hasher.finalize().as_bytes()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn auth() -> SharedKeyAuthenticator { SharedKeyAuthenticator::new([7; 32]) }
+
+    #[test]
+    fn seal_and_verify_round_trip() {
+        let frame = auth().seal("node-a", 1, 42, b"hello".to_vec()).unwrap();
+        assert!(auth().verify(&frame).is_ok());
+    }
+
+    #[test]
+    fn tampering_is_rejected() {
+        let mut frame = auth().seal("node-a", 1, 42, b"hello".to_vec()).unwrap();
+        frame.payload[0] = b'H';
+        assert_eq!(auth().verify(&frame), Err(AuthError::InvalidTag));
+    }
+
+    #[test]
+    fn context_fields_are_authenticated() {
+        let mut frame = auth().seal("node-a", 1, 42, b"hello".to_vec()).unwrap();
+        frame.nonce = 2;
+        assert_eq!(auth().verify(&frame), Err(AuthError::InvalidTag));
+        let mut frame = auth().seal("node-a", 1, 42, b"hello".to_vec()).unwrap();
+        frame.node_id = "node-b".into();
+        assert_eq!(auth().verify(&frame), Err(AuthError::InvalidTag));
+    }
+
+    #[test]
+    fn empty_node_is_rejected() {
+        assert_eq!(auth().seal("", 1, 42, vec![]).unwrap_err(), AuthError::EmptyNodeId);
+    }
+}
