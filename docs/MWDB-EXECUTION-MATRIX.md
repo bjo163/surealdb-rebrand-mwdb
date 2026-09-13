@@ -7,8 +7,8 @@ This is the working dashboard for determining **where the project is now** and *
 - Repository: `bjo163/surealdb-rebrand-mwdb`
 - Branch: `main`
 - Substrate: existing SurrealDB Rust workspace
-- MW-DB feature substrate: `mwdb/local-first` + `mwdb/sync` + `mwdb/replay`
-- Current posture: upstream-derived research/product fork with local-first durability, logical changes, checkpoint sync, conflict classification, CRDT prototype, and standalone replay/import implemented.
+- MW-DB feature substrate: `mwdb/local-first` + `mwdb/sync` + `mwdb/replay` + `mwdb/cursor` + `mwdb/observability`
+- Current posture: upstream-derived research/product fork with local-first durability, logical changes, checkpoint sync, conflict classification, CRDT prototype, persistent peer cursors, and transport-neutral sync metrics.
 - GitHub Issues: disabled; executable backlog remains in `docs/MWDB-ISSUE-PLAN.md`.
 
 ## Overall status
@@ -40,15 +40,17 @@ M10 Native-engine decision      GATE
 | M2-A | Local | local-first contract | DONE (prototype) | `mwdb/local-first` contract | tested |
 | M2-B | Local | durable pending-change queue | DONE (prototype) | append-only journal + status | crash-safe |
 | M2-C | Local | local subscriptions/reconnect semantics | DONE (prototype) | ordered local subscriptions + remote apply | deterministic |
-| M2-D | Local | offline/recovery harness | IN PROGRESS | restart/replay/reconnect fixtures + CI | repeatable |
+| M2-D | Local | offline/recovery harness | DONE (prototype) | restart/replay/retry/fault recovery fixtures | repeatable |
 | M3-A | Events | logical change envelope | DONE (prototype) | `LogicalChangeV1` + deterministic hash | versioned |
 | M3-B | Events | deterministic replay | PARTIAL (prototype) | startup journal replay + standalone replay crate | reproducible |
 | M3-C | Events | change feed/export/import | PARTIAL (prototype) | export + checkpoint delta selection + JSONL import | resumable |
+| M3-D | Events | persistent peer cursor | DONE (prototype) | `mwdb/cursor` durable peer checkpoints | restart-safe |
 | M4-A | Sync | push/pull/checkpoint/resume | DONE (prototype) | sync v0 + two-replica fixture | convergent |
 | M4-B | Conflicts | conflict taxonomy | DONE (prototype) | conservative classifier + policy | explicit |
 | M4-C | CRDT | mergeable-structure prototypes | DONE (prototype) | deterministic G-Counter + algebraic tests | deterministic |
 | M4-D | Resilience | drop/duplicate/reorder fault harness | DONE (prototype) | transport-neutral fault model | repeatable |
-| M4-E | Observability | sync state metrics | PLANNED | metrics contract | measurable |
+| M4-E | Observability | sync state metrics | DONE (prototype) | `mwdb/observability` event/counter contract | measurable |
+| M4-F | Transport | authenticated peer transport | PLANNED | adapter contract | authenticated |
 | M5-A | Versioning | snapshots | PLANNED | API/storage mapping | restorable |
 | M5-B | Versioning | named branches | PLANNED | API | isolated |
 | M5-C | Versioning | diff | PLANNED | change/state diff | accurate |
@@ -105,22 +107,34 @@ mwdb/replay
       +-- verified import
       +-- deterministic reconstruction fixture
       +-- idempotent re-import fixture
+
+mwdb/cursor
+      |
+      +-- peer checkpoint persistence
+      +-- restart recovery
+      +-- malformed-state rejection
+
+mwdb/observability
+      |
+      +-- semantic sync events
+      +-- deterministic counters
+      +-- mergeable metric snapshots
 ```
 
 ## Verification status
 
-Focused tests cover offline writes, restart persistence, acknowledgement persistence, duplicate suppression, journal replay, ordered subscriptions, deterministic hashing, checkpoint deltas, verified remote apply, two-replica convergence, retry idempotency, conflict classification, G-Counter algebraic properties, and JSONL replay/import failure cases.
+Focused tests cover offline writes, restart persistence, acknowledgement persistence, duplicate suppression, journal replay, ordered subscriptions, deterministic hashing, checkpoint deltas, verified remote apply, two-replica convergence, retry idempotency, conflict classification, G-Counter algebraic properties, JSONL replay/import failure cases, persistent peer cursors, and sync metric accumulation/merge.
 
-Dedicated GitHub Actions workflows exist for local-first, sync, and replay prototypes. CI remains the verification source of truth; no production-readiness claim is made from unit tests alone.
+Dedicated GitHub Actions workflows exist for local-first, sync, replay, and observability prototypes. CI remains the verification source of truth; no production-readiness claim is made from unit tests alone.
 
 ## Next execution target
 
 ```text
-M2-D  deterministic fault/recovery harness
+M3 canonical cross-language encoding
           ↓
-M3 canonical cross-language encoding + persistent cursor
+M4 cursor integration + authenticated transport adapter
           ↓
-M4 observability + authenticated transport adapter
+M4 observability integration into sync operations
           ↓
 M7 federation / partition suite
           ↓
