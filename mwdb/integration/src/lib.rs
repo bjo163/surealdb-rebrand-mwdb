@@ -117,7 +117,8 @@ mod tests {
         apply_batch(&mut b, &mut seen_b, &batch).unwrap();
         assert_eq!(b.get("doc:1"), Some(&serde_json::json!({"value": 42})));
 
-        let checkpoint = a.queue().logical_changes().last().unwrap();
+        let logical_changes = a.queue().logical_changes();
+        let checkpoint = logical_changes.last().unwrap();
         let mut cursors = CursorStore::open(&cursor_path).unwrap();
         cursors
             .upsert(PeerCursor {
