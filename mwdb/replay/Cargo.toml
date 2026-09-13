@@ -1,0 +1,12 @@
+[workspace]
+
+[package]
+name = "mwdb-replay"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+mwdb-local-first = { path = "../local-first" }
+serde_json = "1"
+thiserror = "2"
