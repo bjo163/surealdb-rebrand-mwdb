@@ -72,7 +72,7 @@ mod tests {
     fn malformed_jsonl_reports_line_number() {
         let dir = tempdir().unwrap();
         let mut store = LocalFirstStore::open(dir.path(), "target").unwrap();
-        let error = import_jsonl(&mut store, "{}\nnot-json\n").unwrap_err();
+        let error = import_jsonl(&mut store, "\nnot-json\n").unwrap_err();
         assert!(error.to_string().contains("line 2"));
     }
 }
