@@ -97,6 +97,12 @@ Scope: durable per-peer last-change and logical-clock checkpoints.
 Acceptance: peer cursor survives restart, rejects malformed state, and supports idempotent removal.
 Current: `mwdb/cursor` stores deterministic JSON checkpoints with atomic temp-file replacement.
 
+### MW-034 — Canonical cross-language encoding
+Status: PARTIAL
+Scope: freeze a deterministic byte representation for logical-change hashing.
+Acceptance: at least two independent implementations produce identical canonical bytes and hashes from published vectors.
+Current: repository boundary specifies recursively sorted JSON prototype encoding; interoperability vectors and independent implementation remain.
+
 ## M4 — Sync / conflicts
 
 ### MW-040 — Sync protocol v0
@@ -121,12 +127,13 @@ Current: state-based G-Counter prototype with deterministic max merge and algebr
 Status: DONE (prototype)
 Scope: sync latency/state signals, queue depth, retries, conflicts, bytes transferred, and change outcomes.
 Acceptance: semantic events map deterministically to measurable counters.
-Current: `mwdb/observability` provides typed events, counter snapshots, serialization, and snapshot merge. Emission from the sync engine and backend adapters remain future work.
+Current: `mwdb/observability` provides typed events, counter snapshots, serialization, and snapshot merge. Emission from sync engine and backend adapters remain future work.
 
 ### MW-044 — Authenticated transport adapter
-Status: PLANNED
-Scope: bind sync protocol to authenticated peer identity/capability negotiation without hard-coding a transport.
-Acceptance: unauthenticated or unsupported peers cannot mutate replicated state.
+Status: DONE (prototype)
+Scope: transport-neutral authenticated frame boundary.
+Acceptance: tampering is rejected before application and protocol context is authenticated.
+Current: `mwdb/auth` uses a shared 32-byte key and keyed BLAKE3 over version, node ID, nonce, issue time, length, and payload. Public-key identity, replay-window enforcement, key rotation, capabilities, and production federation remain future work.
 
 ## M5 — Branching / time travel
 
@@ -161,7 +168,7 @@ Acceptance: agent changes stay isolated and are emitted as reviewable change set
 Status: PARTIAL
 Scope: deterministic canonicalization and hash calculation.
 Acceptance: identical logical state produces identical hashes across supported targets.
-Current: deterministic prototype hashing exists; canonical cross-language encoding still needs freezing.
+Current: deterministic prototype hashing exists and `docs/MWDB-M6-CANONICAL-ENCODING.md` records the current boundary; production gate requires independent implementation vectors.
 
 ### MW-061 — Merkle state root
 Status: PLANNED
@@ -263,6 +270,6 @@ Acceptance: decision cites benchmark and legal/operational constraints.
 
 ## Current execution priority
 
-`M3-031/032 -> M6-060 -> M4-044 -> M7-073`
+`M3-034 -> M4-044 integration -> M6-062 -> M7-073`
 
-The local-first, logical-change, and sync prototypes are now a usable foundation. The remaining production gate is cross-language canonicalization plus authenticated transport and partition testing. Do not claim production federation until those gates pass.
+Production federation remains blocked on cross-implementation canonical vectors, public-key peer identity/signing, replay protection, capability negotiation, and partition testing. The current shared-key authenticated frame is a transport boundary prototype, not a production federation identity system.
