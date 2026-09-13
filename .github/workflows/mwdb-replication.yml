@@ -6,24 +6,28 @@ on:
       - 'mwdb/replication/**'
       - 'mwdb/auth/**'
       - 'mwdb/canonical/**'
+      - 'mwdb/capabilities/**'
       - 'mwdb/cursor/**'
       - 'mwdb/identity/**'
       - 'mwdb/local-first/**'
       - 'mwdb/merkle/**'
       - 'mwdb/observability/**'
       - 'mwdb/sync/**'
+      - 'mwdb/trust/**'
       - '.github/workflows/mwdb-replication.yml'
   pull_request:
     paths:
       - 'mwdb/replication/**'
       - 'mwdb/auth/**'
       - 'mwdb/canonical/**'
+      - 'mwdb/capabilities/**'
       - 'mwdb/cursor/**'
       - 'mwdb/identity/**'
       - 'mwdb/local-first/**'
       - 'mwdb/merkle/**'
       - 'mwdb/observability/**'
       - 'mwdb/sync/**'
+      - 'mwdb/trust/**'
       - '.github/workflows/mwdb-replication.yml'
 
 jobs:
@@ -35,3 +39,6 @@ jobs:
       - name: Test MW-DB replication
         working-directory: mwdb/replication
         run: cargo test --all-targets
+      - name: Check MW-DB replication
+        working-directory: mwdb/replication
+        run: cargo check
