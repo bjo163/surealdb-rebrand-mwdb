@@ -34,7 +34,7 @@ Acceptance: future diffs can be classified without ambiguity.
 ## M1 — Branding / packaging
 
 ### MW-010 — MW-DB brand specification
-Status: DONE (prototype)
+Status: PLANNED
 Scope: product naming, terminology, README identity, CLI/help wording, and documentation vocabulary.
 Acceptance: user-facing docs consistently identify MW-DB without falsely removing upstream provenance.
 
@@ -83,13 +83,13 @@ Acceptance: mutations serialize and deserialize with stable semantics.
 Status: PARTIAL
 Scope: apply logical changes to rebuild representative state.
 Acceptance: same ordered change history yields byte-equivalent canonical state representation.
-Current: startup journal replay exists; independent replay/import remains.
+Current: startup replay exists and `mwdb/replay` provides verified JSONL reconstruction; arbitrary operations and cross-implementation replay remain.
 
 ### MW-032 — Change feed API
 Status: PARTIAL
 Scope: inspect/export/import logical changes and checkpoints.
 Acceptance: a consumer can resume from a checkpoint without replaying already acknowledged changes.
-Current: logical JSONL export, validation, checkpoint metadata, and checkpoint-based delta selection exist; full import/resume transport API remains.
+Current: logical JSONL export, validation, checkpoint metadata, checkpoint delta selection, and standalone import/idempotent re-import exist; persistent cursor/network feed remain.
 
 ## M4 — Sync / conflicts
 
@@ -109,18 +109,12 @@ Current: classifier and policy mapping cover causal ordering, different-object m
 Status: PARTIAL
 Scope: prototype only well-defined mergeable structures.
 Acceptance: merges are deterministic and tests prove no silent data loss.
-Current: deterministic state-based `GCounter` exists with per-actor max merge and tests for idempotence, commutativity, associativity, and highest-state preservation. Integration with logical changes is intentionally not automatic yet.
+Current: state-based G-Counter prototype with deterministic max merge and algebraic property tests exists. Additional domain-specific CRDTs and production integration remain.
 
 ### MW-043 — Sync observability
 Status: PLANNED
 Scope: sync latency, queue depth, retries, conflicts, bytes transferred, convergence time.
 Acceptance: metrics exist for every sync state transition.
-
-### MW-044 — Sync fault harness
-Status: DONE (prototype)
-Scope: deterministic modeling of dropped, duplicated, and reordered batches without binding to a production transport.
-Acceptance: fault scenarios are reproducible and counters expose the modeled failure modes.
-Current: `FaultHarness` exists in `mwdb/sync` with focused tests.
 
 ## M5 — Branching / time travel
 
@@ -257,6 +251,6 @@ Acceptance: decision cites benchmark and legal/operational constraints.
 
 ## Current execution priority
 
-`M3-031/032 -> M4-042 -> M4-043 -> M7`
+`M2-022 -> M3-031/032 -> M4-043 -> M7-073`
 
-M2 local-first and M3 logical-change prototypes remain the foundation. M4 sync is prototype-complete for deterministic in-memory convergence, but authentication, real network transport, production conflict semantics, observability, and independent replay/import are not complete.
+M2 local-first, M3 logical-change/replay, and M4 sync/conflict prototypes are the active foundation. Do not claim production sync or federation until authenticated transport, persistent cursors, canonical cross-language encoding, and partition testing are complete.
