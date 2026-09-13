@@ -63,10 +63,14 @@ impl TryFrom<WireSignedEnvelope> for SignedBytes {
     }
 }
 
+fn default_next_nonce() -> u64 { 1 }
+
 #[derive(Debug, Default, Serialize, Deserialize)]
 struct DurableSessionState {
     replay: BTreeMap<String, ReplayWindowState>,
     applied: BTreeSet<Uuid>,
+    #[serde(default = "default_next_nonce")]
+    next_nonce: u64,
 }
 
 fn persist_state(path: &Path, state: &DurableSessionState) -> Result<(), ReplicationError> {
@@ -103,7 +107,6 @@ pub struct ReplicationSession {
     state_path: PathBuf,
     state: DurableSessionState,
     metrics: SyncMetrics,
-    next_nonce: u64,
 }
 
 impl ReplicationSession {
@@ -118,12 +121,11 @@ impl ReplicationSession {
             node_id: node_id.clone(),
             identity,
             auth: SharedKeyAuthenticator::new(shared_key),
-            store: LocalFirstStore::open(root.join("local"), &node_id)?,
+            store: LocalFirstStore::open(root.join("local"), node_id.clone())?,
             cursors: CursorStore::open(root.join("cursors.json"))?,
             state_path,
-            state,
             metrics: SyncMetrics::default(),
-            next_nonce: 1,
+            state,
         })
     }
 
@@ -139,8 +141,10 @@ impl ReplicationSession {
         let payload = encode_batch(&batch)?;
         let signed = self.identity.sign(&payload);
         let wire = serde_json::to_vec(&WireSignedEnvelope::from(signed))?;
-        let frame = self.auth.seal(&self.node_id, self.next_nonce, now_ms(), wire)?;
-        self.next_nonce = self.next_nonce.saturating_add(1);
+        let nonce = self.state.next_nonce;
+        let frame = self.auth.seal(&self.node_id, nonce, now_ms(), wire)?;
+        self.state.next_nonce = nonce.saturating_add(1);
+        persist_state(&self.state_path, &self.state)?;
         self.metrics.observe(&SyncEvent::BatchSent { changes: batch.changes.len(), bytes: frame.payload.len() });
         Ok(frame)
     }
@@ -153,18 +157,11 @@ impl ReplicationSession {
         let peer = verify_signed_bytes(&signed)?;
         if peer.peer_id != frame.node_id { return Err(ReplicationError::IdentityBinding); }
         let batch: SyncBatch = mwdb_sync::decode_batch(&signed.payload)?;
-        let seen = &mut self.state.applied;
-        let mut seen_hashes = BTreeSet::new();
-        for id in seen.iter() { seen_hashes.insert(*id); }
-        let mut seen_uuid = seen_hashes;
-        let mut working_seen = seen_uuid.clone().into_iter().collect::<BTreeSet<_>>();
+
         let mut sync_seen = std::collections::HashSet::new();
-        sync_seen.extend(working_seen.iter().copied());
+        sync_seen.extend(self.state.applied.iter().copied());
         let ack = apply_batch(&mut self.store, &mut sync_seen, &batch)?;
-        let mut accepted_ids = BTreeSet::new();
-        for id in &ack.accepted { accepted_ids.insert(*id); }
-        working_seen.extend(accepted_ids);
-        *seen = working_seen;
+        self.state.applied.extend(ack.accepted.iter().copied());
 
         let root_items = batch.changes.iter().map(|change| {
             let value = serde_json::to_value(change)?;
@@ -174,7 +171,7 @@ impl ReplicationSession {
 
         self.state.replay.insert(peer.peer_id.clone(), replay.state());
         if let Some(checkpoint) = ack.checkpoint {
-            let clock = batch.changes.iter().find(|change| change.change_id == checkpoint).map(|change| change.clock).unwrap_or_default();
+            let clock = batch.changes.iter().find(|change| change.change_id == checkpoint).map(|change| change.logical_clock).unwrap_or_default();
             self.cursors.upsert(PeerCursor { peer_id: peer.peer_id.clone(), last_change_id: Some(checkpoint), last_clock: clock })?;
         }
         persist_state(&self.state_path, &self.state)?;
@@ -212,7 +209,7 @@ mod tests {
         assert_eq!(b.store().get("doc:1"), Some(&serde_json::json!({"v": 42})));
         assert_ne!(first.batch_root, [0u8; 32]);
         assert_eq!(first.metrics.batches_received, 1);
-        assert!(b.receive_frame(&frame).is_err());
+        assert!(matches!(b.receive_frame(&frame), Err(ReplicationError::Auth(mwdb_auth::AuthError::Replay))));
 
         drop(b);
         let mut b = ReplicationSession::open(b_dir.path(), "node-b", [2; 32], [9; 32]).unwrap();
@@ -223,11 +220,29 @@ mod tests {
     }
 
     #[test]
+    fn sender_nonce_survives_restart() {
+        let a_dir = tempdir().unwrap();
+        let b_dir = tempdir().unwrap();
+        let f1 = {
+            let mut a = ReplicationSession::open(a_dir.path(), "node-a", [3; 32], [7; 32]).unwrap();
+            a.store_mut().set("doc:1", serde_json::json!(1)).unwrap();
+            a.make_frame(None).unwrap()
+        };
+        let mut b = ReplicationSession::open(b_dir.path(), "node-b", [4; 32], [7; 32]).unwrap();
+        b.receive_frame(&f1).unwrap();
+        let f2 = {
+            let mut a = ReplicationSession::open(a_dir.path(), "node-a", [3; 32], [7; 32]).unwrap();
+            a.make_frame(None).unwrap()
+        };
+        assert!(f2.nonce > f1.nonce);
+    }
+
+    #[test]
     fn forged_frame_context_is_rejected_before_payload_processing() {
         let a_dir = tempdir().unwrap();
         let b_dir = tempdir().unwrap();
-        let mut a = ReplicationSession::open(a_dir.path(), "node-a", [3; 32], [8; 32]).unwrap();
-        let mut b = ReplicationSession::open(b_dir.path(), "node-b", [4; 32], [8; 32]).unwrap();
+        let mut a = ReplicationSession::open(a_dir.path(), "node-a", [5; 32], [8; 32]).unwrap();
+        let mut b = ReplicationSession::open(b_dir.path(), "node-b", [6; 32], [8; 32]).unwrap();
         a.store_mut().set("doc:2", serde_json::json!({"v": 7})).unwrap();
         let mut frame = a.make_frame(None).unwrap();
         frame.node_id = "evil".into();
