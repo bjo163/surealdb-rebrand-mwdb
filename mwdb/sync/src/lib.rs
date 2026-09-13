@@ -359,7 +359,8 @@ mod tests {
         ];
         let mut harness = FaultHarness::default();
         let delivered = harness.deliver(&mut batches, true, true, true);
-        assert_eq!(delivered.len(), 1);
+        assert_eq!(delivered.len(), 2);
+        assert_eq!(delivered[0], delivered[1]);
         assert_eq!(harness.dropped_batches, 1);
         assert_eq!(harness.duplicated_batches, 1);
         assert_eq!(harness.reordered_batches, 1);
