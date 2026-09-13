@@ -1,0 +1,10 @@
+[package]
+name = "mwdb-identity"
+version = "0.1.0"
+edition = "2021"
+license = "BSL-1.1"
+
+[dependencies]
+ed25519-dalek = { version = "2.1", default-features = false, features = ["std"] }
+hex = "0.4"
+thiserror = "2"
