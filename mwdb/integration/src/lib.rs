@@ -2,7 +2,7 @@
 mod tests {
     use std::collections::HashSet;
 
-    use mwdb_auth::{ReplayWindow, SharedKeyAuthenticator};
+    use mwdb_auth::{ReplayStore, SharedKeyAuthenticator};
     use mwdb_canonical::canonicalize;
     use mwdb_cursor::{CursorStore, PeerCursor};
     use mwdb_identity::{verify_signed_bytes, IdentityKey};
@@ -38,16 +38,42 @@ mod tests {
         ];
         let root = state_root(&leaves);
         let proof = build_proof(&leaves, 1).unwrap();
-        assert_eq!(proof.leaf, hash_leaf(canonical.as_bytes()));
+        assert_eq!(proof.leaf, hash_leaf(&signed_change.payload));
         assert!(verify_proof(root, &proof).unwrap());
 
         let auth = SharedKeyAuthenticator::new([23; 32]);
         let frame = auth
             .seal(verified_identity.peer_id.clone(), 7, 123, canonical.into_bytes())
             .unwrap();
-        let mut replay = ReplayWindow::new(8);
-        auth.verify_and_accept(&mut replay, &frame).unwrap();
-        assert!(auth.verify_and_accept(&mut replay, &frame).is_err());
+        let replay_path = std::env::temp_dir().join(format!(
+            "mwdb-integration-replay-{}.json",
+            uuid::Uuid::new_v4()
+        ));
+        {
+            let mut replay = ReplayStore::open(&replay_path).unwrap();
+            auth.verify_and_accept_persistent(&mut replay, 1, 8, &frame)
+                .unwrap();
+        }
+        let mut reopened = ReplayStore::open(&replay_path).unwrap();
+        assert!(auth
+            .verify_and_accept_persistent(&mut reopened, 1, 8, &frame)
+            .is_err());
+        let rotated = auth
+            .seal(verified_identity.peer_id.clone(), 1, 124, b"rotated".to_vec())
+            .unwrap();
+        auth.verify_and_accept_persistent(&mut reopened, 2, 8, &rotated)
+            .unwrap();
+        assert_eq!(
+            reopened.get(&verified_identity.peer_id).unwrap().key_epoch,
+            2
+        );
+        drop(reopened);
+        let reopened = ReplayStore::open(&replay_path).unwrap();
+        assert_eq!(
+            reopened.get(&verified_identity.peer_id).unwrap().key_epoch,
+            2
+        );
+        let _ = std::fs::remove_file(replay_path);
     }
 
     #[test]
