@@ -9,6 +9,7 @@
 <p>
   <a href="https://github.com/bjo163/surealdb-rebrand-mwdb/actions/workflows/mwdb-local-first.yml"><img src="https://img.shields.io/github/actions/workflow/status/bjo163/surealdb-rebrand-mwdb/mwdb-local-first.yml?branch=main&label=local-first%20CI&style=flat-square" alt="Local-first CI"></a>
   <a href="https://github.com/bjo163/surealdb-rebrand-mwdb/actions/workflows/mwdb-sync.yml"><img src="https://img.shields.io/github/actions/workflow/status/bjo163/surealdb-rebrand-mwdb/mwdb-sync.yml?branch=main&label=sync%20CI&style=flat-square" alt="Sync CI"></a>
+  <a href="https://github.com/bjo163/surealdb-rebrand-mwdb/actions/workflows/mwdb-replay.yml"><img src="https://img.shields.io/github/actions/workflow/status/bjo163/surealdb-rebrand-mwdb/mwdb-replay.yml?branch=main&label=replay%20CI&style=flat-square" alt="Replay CI"></a>
   <a href="https://github.com/bjo163/surealdb-rebrand-mwdb"><img src="https://img.shields.io/github/stars/bjo163/surealdb-rebrand-mwdb?style=flat-square" alt="GitHub stars"></a>
   <a href="https://www.rust-lang.org/"><img src="https://img.shields.io/badge/built%20with-Rust-dea584?style=flat-square&logo=rust&logoColor=white" alt="Built with Rust"></a>
 </p>
@@ -88,9 +89,21 @@ M4 now includes an explicit conflict boundary:
 | different objects | merge independently |
 | concurrent same object | surface conflict; never silently overwrite |
 
-There is also a standalone **G-Counter** experiment with per-actor state and max-based merge. Its tests cover the core CRDT properties of idempotence, commutativity, associativity, and preservation of the highest observed actor state.
+There is also a standalone **G-Counter** experiment with per-actor state and max-based merge. Its tests cover idempotence, commutativity, associativity, and preservation of the highest observed actor state.
 
 These CRDT experiments are intentionally **not** wired into ordinary whole-object `set` mutations yet.
+
+### Replay / import
+
+`mwdb/replay` provides a small independent validation surface for logical histories:
+
+- JSONL export helper;
+- hash-verified import through `LocalFirstStore`;
+- deterministic state reconstruction;
+- idempotent re-import;
+- malformed-input line reporting.
+
+This keeps M3 replay/import independently testable without turning the main SurrealDB workspace into a heavy experimental dependency graph.
 
 ## Architecture
 
@@ -104,6 +117,7 @@ MW-DB keeps concerns separated:
 | **Sync** | checkpointed exchange + idempotent application |
 | **Conflict layer** | classify concurrent / causal relationships |
 | **CRDT lab** | typed experiments with deterministic merge semantics |
+| **Replay** | independent logical-history import/reconstruction |
 | **Verification** | hashes, proofs, signatures (future) |
 | **Federation** | authenticated distributed transport (future) |
 | **Agent layer** | capability-scoped data operations (future) |
@@ -124,8 +138,8 @@ The prototype treats concurrent writes to the same object conservatively until a
 M0  Baseline / provenance       ────────────────┐
 M1  Branding / packaging                        │
 M2  Local-first                 ██████████░░     │ active
-M3  Logical changes             ████████░░░░     │ active
-M4  Sync / conflicts            ████████░░░░     │ prototype
+M3  Logical changes             █████████░░░     │ active
+M4  Sync / conflicts            █████████░░░     │ prototype
 M5  Branch / time travel        ░░░░░░░░░░░░     │
 M6  Verification                ░░░░░░░░░░░░     │
 M7  Federation / distribution   ░░░░░░░░░░░░     │
@@ -136,7 +150,7 @@ M10 Native-engine decision      ◆ evidence gate │
 
 ### Current execution order
 
-`M2-022 → M3-031/032 → M4-042 → M4-043 → M7`
+`M2-022 → M3-031/032 → M4-043 → M7-073`
 
 The executable backlog lives in [`docs/MWDB-ISSUE-PLAN.md`](docs/MWDB-ISSUE-PLAN.md), while the architecture decision is recorded in [`docs/MWDB-ADR-0001-architecture-strategy.md`](docs/MWDB-ADR-0001-architecture-strategy.md).
 
@@ -160,11 +174,20 @@ cargo test
 cargo check
 ```
 
-### Run both
+### Run the replay/import prototype
+
+```bash
+cd mwdb/replay
+cargo test
+cargo check
+```
+
+### Run the focused suite
 
 ```bash
 cd mwdb/local-first && cargo test && cargo check
 cd ../sync && cargo test && cargo check
+cd ../replay && cargo test && cargo check
 ```
 
 ## Repository map
@@ -184,7 +207,8 @@ cd ../sync && cargo test && cargo check
 │   └── MWDB-ADR-0001-architecture-strategy.md
 ├── mwdb/
 │   ├── local-first/      # local durability + logical journal
-│   └── sync/             # checkpoint sync + conflicts + CRDT lab
+│   ├── sync/             # checkpoint sync + conflicts + CRDT lab
+│   └── replay/           # logical history import/reconstruction
 └── .github/workflows/    # focused MW-DB CI
 ```
 
@@ -199,6 +223,8 @@ User-facing rebranding does **not** imply that upstream copyright, licensing, tr
 MW-DB still needs authenticated peer identity, production network transport adapters, persisted remote resume state, real transport fault injection, field-aware merge/CRDT integration, canonical cross-language hashing, signed changes, and independent proof verification.
 
 The M4 transport-neutral fault harness is test infrastructure, not a network simulator or production transport.
+
+M3 replay currently supports the prototype's `set` operation. Unsupported operations are rejected rather than approximated.
 
 Most importantly, **same-object concurrent writes are not silently merged today**. The prototype classifier treats them conservatively as `ConcurrentSameObject` and surfaces them for explicit resolution.
 
