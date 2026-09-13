@@ -1,4 +1,5 @@
 #![no_main]
+#![recursion_limit = "256"]
 
 use std::time::Duration;
 
