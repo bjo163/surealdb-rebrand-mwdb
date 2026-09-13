@@ -14,3 +14,4 @@ mwdb-identity = { path = "../identity" }
 mwdb-merkle = { path = "../merkle" }
 mwdb-signing = { path = "../signing" }
 serde_json = "1"
+uuid = { version = "1", features = ["v4"] }
