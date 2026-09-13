@@ -1,0 +1,65 @@
+name: MW-DB Release Gate
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'mwdb/**'
+      - 'docs/canonical-vectors.json'
+      - 'docs/MWDB-RELEASE-GATE.json'
+      - 'tools/canonical_verify.mjs'
+      - '.github/workflows/mwdb-release-gate.yml'
+  pull_request:
+    paths:
+      - 'mwdb/**'
+      - 'docs/canonical-vectors.json'
+      - 'docs/MWDB-RELEASE-GATE.json'
+      - 'tools/canonical_verify.mjs'
+      - '.github/workflows/mwdb-release-gate.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  canonical-vectors:
+    name: Independent canonical vectors
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node tools/canonical_verify.mjs
+
+  mwdb-crates:
+    name: MW-DB focused crate tests
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        crate:
+          - canonical
+          - local-first
+          - sync
+          - replay
+          - cursor
+          - observability
+          - auth
+          - identity
+          - signing
+          - merkle
+          - capabilities
+          - trust
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            mwdb/${{ matrix.crate }}
+      - name: Test ${{ matrix.crate }}
+        working-directory: mwdb/${{ matrix.crate }}
+        run: cargo test --all-targets
+      - name: Check ${{ matrix.crate }}
+        working-directory: mwdb/${{ matrix.crate }}
+        run: cargo check --all-targets
