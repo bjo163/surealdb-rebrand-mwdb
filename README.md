@@ -24,13 +24,13 @@
 
 </div>
 
-> **Project status:** experimental / prototype. MW-DB is not yet a drop-in replacement for SurrealDB and is not production-ready as a distributed database.
+> **Project status:** release-track prototype. MW-DB is not yet a drop-in replacement for SurrealDB and is not production-ready as a distributed database. See [`docs/MWDB-RELEASE-GATE.json`](docs/MWDB-RELEASE-GATE.json) for the blocking P0 gates.
 
 ## Why MW-DB?
 
 MW-DB starts from a simple idea: **keep the proven database substrate, then build a stronger logical data layer around it.**
 
-The project is exploring a database model where local writes remain useful offline, changes have stable logical identities, synchronization can resume from checkpoints, and data evolution can eventually become verifiable and branchable.
+The project is exploring a database model where local writes remain useful offline, changes have stable logical identities, synchronization can resume from checkpoints, and data evolution can become verifiable and branchable.
 
 The direction is deliberately incremental:
 
@@ -42,7 +42,9 @@ mature SurrealDB substrate
           ├── checkpointed sync
           ├── conflict classification
           ├── CRDT experiments
-          ├── provenance / verification
+          ├── provenance / identity / signing
+          ├── Merkle state + proofs
+          ├── federation / transport
           ├── branching / time travel
           └── agent-native data operations
 ```
@@ -79,9 +81,22 @@ MW-DB is **not** starting with a storage-engine rewrite, blockchain, or custom P
 - deterministic two-replica offline/reconnect fixture;
 - deterministic drop / duplicate / reorder fault harness.
 
+### Verification substrate
+
+The current prototype also contains focused crates for:
+
+- canonical encoding;
+- public-key peer identity;
+- signing;
+- Merkle state roots and inclusion proofs;
+- replay-window checks;
+- capability intersection.
+
+These components are on the **integration path**, not presented as production security guarantees yet. Cross-language canonical vectors are maintained in [`docs/canonical-vectors.json`](docs/canonical-vectors.json).
+
 ### Conflict policy + CRDT lab
 
-M4 now includes an explicit conflict boundary:
+M4 includes an explicit conflict boundary:
 
 | Situation | Prototype policy |
 |---|---|
@@ -89,9 +104,7 @@ M4 now includes an explicit conflict boundary:
 | different objects | merge independently |
 | concurrent same object | surface conflict; never silently overwrite |
 
-There is also a standalone **G-Counter** experiment with per-actor state and max-based merge. Its tests cover idempotence, commutativity, associativity, and preservation of the highest observed actor state.
-
-These CRDT experiments are intentionally **not** wired into ordinary whole-object `set` mutations yet.
+There is also a standalone **G-Counter** experiment with per-actor state and max-based merge. These experiments are intentionally not wired into ordinary whole-object `set` mutations yet.
 
 ### Replay / import
 
@@ -116,11 +129,11 @@ MW-DB keeps concerns separated:
 | **Logical changes** | stable change identity + causal metadata |
 | **Sync** | checkpointed exchange + idempotent application |
 | **Conflict layer** | classify concurrent / causal relationships |
-| **CRDT lab** | typed experiments with deterministic merge semantics |
-| **Replay** | independent logical-history import/reconstruction |
-| **Verification** | hashes, proofs, signatures (future) |
-| **Federation** | authenticated distributed transport (future) |
-| **Agent layer** | capability-scoped data operations (future) |
+| **Verification** | hashes, signatures, Merkle roots, proofs |
+| **Identity / trust** | public-key peer identity and trust boundaries |
+| **Replay protection** | peer-scoped duplicate/replay control |
+| **Federation** | authenticated distributed transport |
+| **Agent layer** | capability-scoped data operations |
 
 ### Important design rules
 
@@ -135,24 +148,24 @@ The prototype treats concurrent writes to the same object conservatively until a
 ## Roadmap
 
 ```text
-M0  Baseline / provenance       ────────────────┐
-M1  Branding / packaging                        │
-M2  Local-first                 ██████████░░     │ active
-M3  Logical changes             █████████░░░     │ active
-M4  Sync / conflicts            █████████░░░     │ prototype
-M5  Branch / time travel        ░░░░░░░░░░░░     │
-M6  Verification                ░░░░░░░░░░░░     │
-M7  Federation / distribution   ░░░░░░░░░░░░     │
-M8  Adaptive consistency        ░░░░░░░░░░░░     │
-M9  Agent-native data plane     ░░░░░░░░░░░░     │
-M10 Native-engine decision      ◆ evidence gate │
+M0  Baseline / provenance       ████░░░░░░░░     release gate
+M1  Branding / packaging        ██████████░░     prototype
+M2  Local-first                 ██████████░░     prototype
+M3  Logical changes              █████████░░░     prototype
+M4  Sync / conflicts             █████████░░░     prototype
+M5  Branch / time travel         ░░░░░░░░░░░░     next
+M6  Verification                 █████░░░░░░░     integration
+M7  Federation / distribution    █████░░░░░░░     integration
+M8  Adaptive consistency         ░░░░░░░░░░░░     later
+M9  Agent-native data plane      ░░░░░░░░░░░░     later
+M10 Native-engine decision       ◆ evidence gate
 ```
 
 ### Current execution order
 
-`M2-022 → M3-031/032 → M4-043 → M7-073`
+`P0 integration → canonical interoperability → identity/replay → signing/Merkle → transport/partition → benchmark/provenance → M5 branch/time-travel`
 
-The executable backlog lives in [`docs/MWDB-ISSUE-PLAN.md`](docs/MWDB-ISSUE-PLAN.md), while the architecture decision is recorded in [`docs/MWDB-ADR-0001-architecture-strategy.md`](docs/MWDB-ADR-0001-architecture-strategy.md).
+The executable backlog lives in [`docs/MWDB-ISSUE-PLAN.md`](docs/MWDB-ISSUE-PLAN.md), while the architecture decision is recorded in [`docs/MWDB-ADR-0001-architecture-strategy.md`](docs/MWDB-ADR-0001-architecture-strategy.md). The current release gate is [`docs/MWDB-RELEASE-GATE.json`](docs/MWDB-RELEASE-GATE.json).
 
 ## Quick start
 
@@ -182,13 +195,9 @@ cargo test
 cargo check
 ```
 
-### Run the focused suite
+### Run the canonical vectors
 
-```bash
-cd mwdb/local-first && cargo test && cargo check
-cd ../sync && cargo test && cargo check
-cd ../replay && cargo test && cargo check
-```
+The same vector file is intended to be implemented independently by another language/runtime before GAP-02 can close.
 
 ## Repository map
 
@@ -200,29 +209,38 @@ cd ../replay && cargo test && cargo check
 │   ├── MWDB-ARCHITECTURE.md
 │   ├── MWDB-EXECUTION-MATRIX.md
 │   ├── MWDB-ISSUE-PLAN.md
-│   ├── MWDB-M2-LOCAL-FIRST.md
-│   ├── MWDB-M3-CHANGE-MODEL.md
-│   ├── MWDB-M4-SYNC-V0.md
-│   ├── MWDB-M4-CONFLICTS-CRDT-V0.md
+│   ├── MWDB-RELEASE-GATE.json
+│   ├── MWDB-PROVENANCE.md
+│   ├── MWDB-AUDIT-GAP-TASKS.md
+│   ├── canonical-vectors.json
 │   └── MWDB-ADR-0001-architecture-strategy.md
 ├── mwdb/
-│   ├── local-first/      # local durability + logical journal
-│   ├── sync/             # checkpoint sync + conflicts + CRDT lab
-│   └── replay/           # logical history import/reconstruction
-└── .github/workflows/    # focused MW-DB CI
+│   ├── auth/
+│   ├── canonical/
+│   ├── capabilities/
+│   ├── cursor/
+│   ├── identity/
+│   ├── local-first/
+│   ├── merkle/
+│   ├── observability/
+│   ├── replay/
+│   ├── signing/
+│   ├── sync/
+│   └── trust/
+└── .github/workflows/    # focused MW-DB and upstream CI
 ```
 
 ## Compatibility and provenance
 
-MW-DB is derived from the upstream SurrealDB project. The repository intentionally preserves upstream provenance while adding MW-DB-specific contracts and experimental crates.
+MW-DB is derived from the upstream SurrealDB project. The repository intentionally preserves upstream provenance while adding MW-DB-specific contracts and experimental crates. See [`docs/MWDB-PROVENANCE.md`](docs/MWDB-PROVENANCE.md).
 
 User-facing rebranding does **not** imply that upstream copyright, licensing, trademarks, or third-party components have been removed. See the repository's license and provenance documentation before redistribution.
 
 ## Current limitations
 
-MW-DB still needs authenticated peer identity, production network transport adapters, persisted remote resume state, real transport fault injection, field-aware merge/CRDT integration, canonical cross-language hashing, signed changes, and independent proof verification.
+MW-DB still needs an independent canonical implementation, full sync/cursor wiring, enforced public-key identity, persistent replay/key lifecycle, signed-change + Merkle integration, a production network transport adapter, and a partition/federation test suite.
 
-The M4 transport-neutral fault harness is test infrastructure, not a network simulator or production transport.
+The current transport-neutral fault harness is test infrastructure, not a network simulator or production transport.
 
 M3 replay currently supports the prototype's `set` operation. Unsupported operations are rejected rather than approximated.
 
