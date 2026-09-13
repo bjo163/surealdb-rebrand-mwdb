@@ -1,0 +1,26 @@
+{
+  "schema": "mwdb-canonical-v1",
+  "description": "Language-neutral JSON canonicalization vectors. Implementations must produce the exact encoded value before hashing with BLAKE3-256.",
+  "hash": "BLAKE3-256",
+  "vectors": [
+    {"id":"object-key-order","input":{"b":2,"a":1},"canonical":"{\"a\":1,\"b\":2}"},
+    {"id":"nested-object-order","input":{"z":{"b":2,"a":1},"a":[{"d":4,"c":3}]},"canonical":"{\"a\":[{\"c\":3,\"d\":4}],\"z\":{\"a\":1,\"b\":2}}"},
+    {"id":"array-order","input":[1,2],"canonical":"[1,2]"},
+    {"id":"array-order-reversed","input":[2,1],"canonical":"[2,1]"},
+    {"id":"integer","input":1,"canonical":"1"},
+    {"id":"decimal-integral","input":1.0,"canonical":"1"},
+    {"id":"scientific-integral","input":1e0,"canonical":"1"},
+    {"id":"negative-zero","input":-0.0,"canonical":"0"},
+    {"id":"negative-integer","input":-42,"canonical":"-42"},
+    {"id":"safe-max-integer","input":9007199254740991,"canonical":"9007199254740991"}
+  ],
+  "rules": [
+    "Objects sort member names lexicographically by Unicode code point order.",
+    "Arrays preserve input order.",
+    "Null, booleans, and strings use their JSON forms.",
+    "Finite integral numbers normalize to their decimal integer form.",
+    "Negative zero normalizes to 0.",
+    "Non-finite numbers are rejected.",
+    "Hash the UTF-8 bytes of the canonical representation with BLAKE3-256."
+  ]
+}
